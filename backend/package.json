@@ -1,0 +1,28 @@
+{
+  "_comment_file": "Backend dependency manifest. This is the Node equivalent of a Python requirements.txt: 'npm install' reads it and installs everything into node_modules. JSON forbids // comments and npm rejects them, so explanations live in these _comment_* keys (npm ignores unknown keys) and in the README.",
+  "name": "scholarship-network-backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "_comment_type": "'module' lets us use import/export syntax (ESM) in server.js and src/*.js instead of require().",
+  "scripts": {
+    "dev": "nodemon server.js",
+    "start": "node server.js"
+  },
+  "_comment_scripts": "'npm run dev' = auto-restart on file changes (local development); 'npm start' = plain run (used by Render/Railway in production).",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2",
+    "pg": "^8.13.1"
+  },
+  "_comment_dependencies": "express = HTTP server/routing; cors = lets the GitHub Pages frontend call this API cross-origin; dotenv = loads .env into process.env; pg = PostgreSQL driver used by src/config/db.js.",
+  "devDependencies": {
+    "nodemon": "^3.1.7"
+  },
+  "_comment_devDependencies": "nodemon = dev-only auto-reloader; not installed/needed in production.",
+  "engines": {
+    "node": ">=18"
+  },
+  "_comment_engines": "Requires Node 18+ because the code uses the built-in global fetch() (added in Node 18) for the Day 4 scholarship API import."
+}
