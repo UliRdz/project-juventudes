@@ -1,22 +1,13 @@
-<!-- index.html -->
-<!-- PURPOSE: The single HTML page Vite serves. The React app is injected into
-     the #root div by src/main.jsx. This is the shell of the whole SPA. -->
-<!-- INTENDED OUTPUT LINK: everything the user sees (map, popups, chat, admin)
-     is rendered by React inside #root; without this file there is no page. -->
-<!DOCTYPE html>                                    <!-- Declares this as a modern HTML5 document. -->
-<html lang="es">                                   <!-- lang="es" because the platform is Spanish-first (matches the product spec). -->
-  <head>                                           <!-- Metadata + resource links (not visible content). -->
-    <meta charset="UTF-8" />                       <!-- Use UTF-8 so Spanish accents (á, ñ, ü) render correctly. -->
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" /> <!-- Make the layout responsive on phones. -->
-    <link rel="icon" href="/scholarship-network/favicon.svg" /> <!-- Tab icon; path includes the Pages base so it loads in production. -->
-    <title>Red de Becas</title>                    <!-- Browser tab title shown to the user. -->
-  </head>                                          <!-- End head. -->
-  <body>                                           <!-- Visible page area. -->
-    <!-- Google Translate mount point (widget wired on Day 3 for English support). -->
-    <div id="google_translate_element"></div>      <!-- Empty container the Translate script will fill; lets users switch es<->en. -->
-
-    <div id="root"></div>                          <!-- React mounts the entire app here (see src/main.jsx). -->
-
-    <script type="module" src="/src/main.jsx"></script> <!-- Load the app's JS entry as an ES module; Vite rewrites this path on build. -->
-  </body>                                          <!-- End body. -->
-</html>                                            <!-- End document. -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>frontend</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
