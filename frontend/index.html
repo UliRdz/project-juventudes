@@ -1,13 +1,88 @@
 <!doctype html>
-<html lang="en">
+<!-- frontend/index.html
+     PURPOSE: The ONE HTML page of the single-page application. It provides the
+     #root element React mounts into, the tab metadata, and the Google Translate
+     widget required by the spec (Spanish-first UI, optional English).
+     INTENDED OUTPUT LINK: Vite rewrites the module script below at build time and
+     emits the result into dist/, which is what GitHub Pages publishes. Everything
+     the user sees is rendered by src/main.jsx into #root.
+
+     CHANGE (photo release): the Google Translate container moved from the normal
+     document flow to a FIXED position on the RIGHT of the screen (class
+     .gt-widget, styled in src/styles/tokens.css). The matching top-LEFT slot is
+     filled by the logo, which is rendered by React in src/App.jsx (BrandLogo) so
+     it can use import.meta.env.BASE_URL and stay correct under the
+     /project-juventudes/ subpath. -->
+<html lang="es">
+  <!-- lang="es" tells browsers, screen readers AND Google Translate that the
+       source language is Spanish; the widget below relies on it. -->
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <!-- UTF-8 so Spanish accents (á, é, ñ) and country names render correctly. -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>frontend</title>
+    <!-- Makes the layout respond to phone widths instead of rendering a zoomed-out desktop page. -->
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <!-- Relative "./" path so the icon resolves both at localhost:5173/project-juventudes/ and on GitHub Pages. -->
+    <title>Red de Becas-JuventudesGTO</title>
+    <!-- Browser tab title (Spanish-first, per the product requirement). -->
+
+    <!-- Minimal inline styling for the translate slot ONLY. It is inline (not in
+         tokens.css) because Google injects its dropdown before the React bundle's
+         stylesheet is guaranteed to be parsed; without this the widget would flash
+         in the middle of the page before jumping to the right. -->
+    <style>
+      /* Fixed top-right slot for the language selector. */
+      .gt-widget {
+        position: fixed;        /* Stays in the corner while the page scrolls. */
+        top: 12px;              /* Small gap from the top edge. */
+        right: 12px;            /* RIGHT of the screen, as requested (it used to sit inline at the top of the page). */
+        z-index: 1100;          /* Above the map (Leaflet ~800) but below the chat widget's own layer. */
+        background: #ffffff;    /* White chip so the dropdown stays readable over the map. */
+        border: 1px solid #e6e6e6; /* Soft-gray border matching --color-border. */
+        border-radius: 10px;    /* Matches --radius used throughout the app. */
+        padding: 4px 8px;       /* Breathing room around Google's <select>. */
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08); /* Slight lift so it reads as an overlay control. */
+      }
+
+      /* Google injects a full-width banner iframe and pushes <body> down with an
+         inline "top: 40px". That shifted the fixed logo and this widget off their
+         corners the moment a translation was applied, so both are neutralized. */
+      body { top: 0 !important; }              /* Cancel the injected offset. */
+      .skiptranslate iframe { display: none !important; } /* Hide the banner; the dropdown below still switches back to Spanish. */
+    </style>
   </head>
   <body>
+    <!-- The language selector container. Google's script (loaded at the bottom)
+         finds this element by id and injects its <select> into it. -->
+    <div id="google_translate_element" class="gt-widget"></div>
+
+    <!-- React mounts the entire application here (see src/main.jsx). Everything
+         above and below this div is static shell; everything inside it is React. -->
     <div id="root"></div>
+
+    <!-- Google Translate initializer. The function name is fixed: Google's loader
+         calls window.googleTranslateElementInit exactly once when it is ready. -->
+    <script type="text/javascript">
+      function googleTranslateElementInit() {
+        new google.translate.TranslateElement(
+          {
+            pageLanguage: "es",          // The site is authored in Spanish (matches <html lang="es">).
+            includedLanguages: "es,en",  // Offer only Spanish and English, per the spec's "English translation" requirement.
+            autoDisplay: false,          // Never auto-translate on load; Spanish-first means the user opts in.
+          },
+          "google_translate_element"     // The id of the container div above (now fixed to the right).
+        );
+      }
+    </script>
+    <!-- Google's loader. It is external and async by nature; if it fails (offline,
+         blocked), the app still works — only the language dropdown is missing. -->
+    <script
+      type="text/javascript"
+      src="https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInit"
+    ></script>
+
+    <!-- The React entry point. Vite replaces this path at build time with the
+         hashed bundle name and injects the compiled CSS link alongside it. -->
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

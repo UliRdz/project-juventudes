@@ -15,7 +15,7 @@ CREATE TABLE users (
   password_hash     TEXT NOT NULL,                             -- bcrypt hash only (never the raw password) — set in Day 2 registration.
   totp_enabled      BOOLEAN NOT NULL DEFAULT FALSE,            -- Whether the user turned on 2FA; controls the second login step (Day 2).
   totp_secret       TEXT,                                      -- The shared TOTP secret (encrypted in prod); NULL until 2FA is set up.
-  profile_photo_url TEXT,                                      -- URL of the uploaded avatar shown on the user's map card (Day 3).
+  profile_photo_url TEXT,                                      -- Path/URL of the uploaded avatar. WRITTEN by POST /auth/me/photo (the "Cambiar foto" button in Profile.jsx); READ by the map's user cards, the app header and the chat header. Stored RELATIVE ("/uploads/x.jpg"), so the frontend runs it through mediaUrl() in src/api/client.js to prefix the backend origin.
   first_name        VARCHAR(80) NOT NULL,                      -- Shown on profile and user cards.
   last_name         VARCHAR(80) NOT NULL,                      -- Shown on profile and user cards.
   city_origin       VARCHAR(120),                              -- Hometown city (profile info; optional).
@@ -24,8 +24,8 @@ CREATE TABLE users (
   current_city      VARCHAR(120),                              -- Displayed on the user card under their name.
   status            VARCHAR(20) CHECK (status IN ('working','studying')), -- Constrained to two values so the UI can render a reliable badge.
   institution_company VARCHAR(160),                            -- Where they study/work; searchable by admins (Day 5).
-  phone_number      VARCHAR(30),                               -- Contact number (kept private; never returned in the public country list).
-  phone_country_code VARCHAR(8),                               -- Dialing code stored separately for clean formatting/validation.
+  phone_number      VARCHAR(30),                               -- Contact number. PRIVATE BY DESIGN: written by POST /auth/register and PATCH /users/me (Register.jsx / Profile.jsx) and readable by admins via /admin/users, but deliberately absent from the GET /users projection that fills the public country panel.
+  phone_country_code VARCHAR(8),                               -- Dialing code stored separately for clean formatting/validation (e.g. '+52'); same private visibility rule as phone_number. The 8-char width is mirrored by maxLength={8} on the inputs and by the length guard in auth.routes.js.
   is_active         BOOLEAN NOT NULL DEFAULT TRUE,             -- Soft-delete/ban flag; admins flip this off instead of deleting rows (Day 5).
   created_at        TIMESTAMPTZ NOT NULL DEFAULT now()         -- Signup timestamp; feeds the "Total users" dashboard widget (Day 5).
 );

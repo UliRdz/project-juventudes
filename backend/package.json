@@ -1,7 +1,7 @@
 {
   "_comment_file": "Backend dependency manifest. This is the Node equivalent of a Python requirements.txt: 'npm install' reads it and installs everything into node_modules. JSON forbids // comments and npm rejects them, so explanations live in these _comment_* keys (npm ignores unknown keys) and in the README.",
-  "name": "scholarship-network-backend",
-  "version": "0.1.0",
+  "name": "project-juventudes-backend",
+  "version": "0.5.0",
   "private": true,
   "type": "module",
   "_comment_type": "'module' lets us use import/export syntax (ESM) in server.js and src/*.js instead of require().",
@@ -11,18 +11,32 @@
   },
   "_comment_scripts": "'npm run dev' = auto-restart on file changes (local development); 'npm start' = plain run (used by Render/Railway in production).",
   "dependencies": {
+    "bcrypt": "^5.1.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.21.2",
-    "pg": "^8.13.1"
+    "express-rate-limit": "^7.4.1",
+    "helmet": "^8.0.0",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^1.4.5-lts.1",
+    "node-cron": "^3.0.3",
+    "nodemailer": "^6.9.16",
+    "pg": "^8.13.1",
+    "qrcode": "^1.5.4",
+    "socket.io": "^4.8.1",
+    "speakeasy": "^2.0.0"
   },
-  "_comment_dependencies": "express = HTTP server/routing; cors = lets the GitHub Pages frontend call this API cross-origin; dotenv = loads .env into process.env; pg = PostgreSQL driver used by src/config/db.js.",
+  "_comment_dependencies_day1": "express = HTTP server/routing; cors = lets the GitHub Pages frontend call this API cross-origin; dotenv = loads .env into process.env; pg = PostgreSQL driver used by src/config/db.js.",
+  "_comment_dependencies_day2": "bcrypt = one-way password hashing; jsonwebtoken = sign/verify the login JWT (also used to authenticate WebSocket handshakes); speakeasy = TOTP secret + 6-digit code (RFC 6238); qrcode = render the TOTP secret as a scannable QR; multer = parse multipart file uploads (profile photo).",
+  "_comment_dependencies_day4": "socket.io = real-time WebSocket layer for live chat delivery; nodemailer = sends the mandatory chat notification email over SMTP; node-cron = schedules the daily 03:00 scholarship refresh; express-rate-limit = caps chat sends and login attempts (anti-spam / anti-brute-force).",
   "devDependencies": {
-    "nodemon": "^3.1.7"
+    "nodemon": "^3.1.7",
+    "smtp-server": "^3.13.6"
   },
-  "_comment_devDependencies": "nodemon = dev-only auto-reloader; not installed/needed in production.",
+  "_comment_devDependencies": "nodemon = dev-only auto-reloader. smtp-server = dev-only local SMTP catcher used by scripts/dev-smtp.js so you can verify chat emails without sending real mail (Mailtrap/MailHog are equivalent hosted options). Neither is needed in production.",
   "engines": {
     "node": ">=18"
   },
-  "_comment_engines": "Requires Node 18+ because the code uses the built-in global fetch() (added in Node 18) for the Day 4 scholarship API import."
+  "_comment_engines": "Requires Node 18+ because the scheduler uses the built-in global fetch() (added in Node 18) to pull the scholarship source.",
+  "_comment_dependencies_day5": "helmet = sets protective HTTP response headers (HSTS to force HTTPS, no-sniff, frameguard, etc.) as the Day 5 hardening pass."
 }

@@ -1,0 +1,74 @@
+# render.yaml
+# PURPOSE: Infrastructure-as-code for the backend. Render reads this "blueprint" and
+# provisions the API service and its PostgreSQL database automatically.
+# INTENDED OUTPUT LINK: this is the other half of the deployment — GitHub Pages
+# serves the static frontend, and this runs the stateful API the frontend calls.
+# Keeping it in version control means the whole backend is reproducible from a
+# clean clone instead of a series of remembered dashboard clicks.
+
+services:
+  - type: web                       # A public HTTP service (as opposed to a worker or cron).
+    name: project-juventudes-api    # Service name shown in the Render dashboard.
+    runtime: node                   # Node.js runtime.
+    plan: free                      # Free tier. NOTE: free instances SLEEP when idle - see the scheduler note below.
+    rootDir: backend                # The API lives in the backend/ subfolder of the repo.
+    buildCommand: npm ci            # Reproducible install from package-lock.json (never `npm install` in CI).
+    startCommand: npm start         # Runs `node server.js` (see backend/package.json scripts).
+    healthCheckPath: /health        # Render polls this endpoint to know the service is alive.
+
+    envVars:
+      - key: DATABASE_URL           # PostgreSQL connection string...
+        fromDatabase:
+          name: project-juventudes-db  # ...injected automatically from the database defined below.
+          property: connectionString
+
+      - key: DATABASE_SSL
+        value: "true"               # Managed Postgres requires TLS (src/config/db.js reads this).
+
+      - key: NODE_VERSION
+        value: "20"                 # Pin Node 20; the code requires >=18 for global fetch().
+
+      - key: JWT_SECRET
+        generateValue: true         # Render generates a long random value and keeps it secret.
+
+      - key: ADMIN_JWT_SECRET
+        generateValue: true         # A SEPARATE secret for admin tokens, so one leak doesn't compromise both.
+
+      # ---- Values you must fill in from the Render dashboard ----------------
+      # sync: false means "don't take a value from this file" - Render prompts for
+      # it instead, which keeps real secrets out of the repository.
+      - key: FRONTEND_ORIGIN
+        sync: false                 # e.g. https://<your-user>.github.io  (locks CORS + Socket.io to your site).
+      - key: SMTP_HOST
+        sync: false                 # Production mail relay hostname.
+      - key: SMTP_PORT
+        sync: false                 # Usually 587.
+      - key: SMTP_USER
+        sync: false                 # SMTP username.
+      - key: SMTP_PASS
+        sync: false                 # SMTP password (secret).
+      - key: SMTP_FROM
+        sync: false                 # e.g. juventudes@gtoxmundo.com
+      - key: SCHOLARSHIP_API_URL
+        sync: false                 # Source the daily refresh pulls from.
+
+databases:
+  - name: project-juventudes-db     # The managed PostgreSQL instance.
+    databaseName: juventudes        # Name of the database created inside it.
+    plan: free                      # Free tier (has storage and retention limits).
+
+# ---------------------------------------------------------------------------
+# AFTER THE FIRST DEPLOY - apply the schema once against the managed database:
+#
+#   psql "$DATABASE_URL" -f src/db/schema.sql
+#   psql "$DATABASE_URL" -f src/db/migrations/002_day5_admin.sql
+#
+# CREATE THE FIRST ADMIN (there is no signup route for admins, by design):
+#   node scripts/create-admin.js admin@example.com "a-strong-password"
+#
+# IMPORTANT - SLEEPING INSTANCES:
+# The 24h scholarship refresh runs via node-cron INSIDE this process, so it only
+# fires while the service is awake. On the free plan (which sleeps when idle), move
+# the trigger to an external GitHub Actions cron that calls:
+#     POST /admin/scholarships/refresh   (with an admin token)
+# ---------------------------------------------------------------------------

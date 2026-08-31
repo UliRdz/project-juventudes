@@ -1,0 +1,77 @@
+# .github/workflows/deploy-frontend.yml
+# PURPOSE: Automatically build the React frontend and publish it to GitHub Pages
+# whenever frontend code lands on main.
+# INTENDED OUTPUT LINK: this is what puts the site online. It bakes VITE_API_URL
+# into the bundle at BUILD time (Vite inlines env vars; there is no server to read
+# them at runtime), so the deployed SPA knows where the backend lives.
+
+name: Deploy frontend to Pages          # Shown in the repository's Actions tab.
+
+on:                                     # When this workflow runs:
+  push:                                 # On a push...
+    branches: [main]                    # ...to the main branch...
+    paths: ["frontend/**"]              # ...but only when frontend files changed (skips backend-only commits).
+  workflow_dispatch:                    # Also allow running it by hand from the Actions tab.
+
+permissions:                            # Least-privilege token scopes for this workflow:
+  contents: read                        # Read the repository source.
+  pages: write                          # Publish to GitHub Pages.
+  id-token: write                       # Required by deploy-pages for its OIDC handshake.
+
+concurrency:                            # Prevent two deploys racing each other.
+  group: pages                          # All runs share this queue name...
+  cancel-in-progress: true              # ...and a newer run cancels an older in-flight one.
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest              # Standard GitHub-hosted Linux runner.
+    environment:
+      name: github-pages                # Ties the run to the github-pages environment...
+      url: ${{ steps.deployment.outputs.page_url }}  # ...and surfaces the live URL in the UI.
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4       # Clone the repository into the runner.
+
+      - name: Set up Node
+        uses: actions/setup-node@v4     # Install Node.js.
+        with:
+          node-version: 20              # Node 20 LTS: matches the backend's >=18 requirement.
+          cache: npm                    # Cache npm downloads to speed up later runs...
+          cache-dependency-path: frontend/package-lock.json  # ...keyed on the frontend lockfile.
+
+      - name: Install dependencies
+        working-directory: frontend     # Run inside the frontend folder.
+        # `npm ci` (not `npm install`) installs exactly what package-lock.json
+        # pins, so a deploy can never silently pick up a different version.
+        run: npm ci
+
+      - name: Build
+        working-directory: frontend
+        env:
+          # The deployed backend's URL, stored as a repository secret (Settings ->
+          # Secrets and variables -> Actions). Vite inlines any VITE_-prefixed
+          # variable into the bundle at build time.
+          VITE_API_URL: ${{ secrets.VITE_API_URL }}
+        run: npm run build              # Produces the static site in frontend/dist.
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5 # Prepares the Pages deployment context.
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: frontend/dist           # Publish the built output, not the source.
+
+      - name: Deploy
+        id: deployment                  # Named so the environment URL above can reference it.
+        uses: actions/deploy-pages@v4   # Publishes the artifact to GitHub Pages.
+
+# ---------------------------------------------------------------------------
+# ONE-TIME SETUP (required before the first run):
+#   1. Repo Settings -> Pages -> Source: "GitHub Actions".
+#   2. Repo Settings -> Secrets and variables -> Actions -> New secret:
+#        VITE_API_URL = https://your-backend.onrender.com
+#   3. Confirm frontend/vite.config.js has base: "/project-juventudes/" —
+#      it MUST match the repository name or every asset 404s and the page is blank.
+# ---------------------------------------------------------------------------

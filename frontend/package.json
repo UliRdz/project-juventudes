@@ -1,29 +1,27 @@
 {
-  "name": "frontend",
+  "_comment_file": "Frontend dependency manifest. Node equivalent of requirements.txt: 'npm install' installs these into node_modules. JSON forbids // comments, so notes live in _comment_* keys (ignored by npm) and in the README.",
+  "name": "project-juventudes-frontend",
+  "version": "0.4.0",
   "private": true,
-  "version": "0.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "generate:countries": "node scripts/generate-countries.js"
   },
+  "_comment_scripts": "'dev' = local hot-reloading server on :5173; 'build' = produce the static files in dist/ that GitHub Pages serves; 'preview' = serve the built dist/ locally to test the production bundle; 'generate:countries' = rebuild src/data/countries.js from public/geo/world.geojson so the country list can never drift from the map.",
   "dependencies": {
     "leaflet": "^1.9.4",
-    "react": "^19.2.8",
-    "react-dom": "^19.2.8",
-    "react-leaflet": "^5.0.0"
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-leaflet": "^4.2.1",
+    "socket.io-client": "^4.8.1"
   },
+  "_comment_dependencies": "react + react-dom = the UI library and its DOM renderer; leaflet = the map engine; react-leaflet = React bindings for Leaflet used by the Day 3 map (4.x is paired with React 18 on purpose - react-leaflet 5 requires React 19); socket.io-client (Day 4) = the WebSocket client that receives live chat messages, and must stay on the same 4.x major as the server's socket.io.",
   "devDependencies": {
-    "@eslint/js": "^10.0.1",
-    "@types/react": "^19.2.18",
-    "@types/react-dom": "^19.2.4",
-    "@vitejs/plugin-react": "^6.1.0",
-    "eslint": "^10.9.0",
-    "eslint-plugin-react-hooks": "^7.1.1",
-    "eslint-plugin-react-refresh": "^0.5.4",
-    "globals": "^17.11.0",
-    "vite": "^8.2.2"
-  }
+    "@vitejs/plugin-react": "^4.3.4",
+    "vite": "^5.4.11"
+  },
+  "_comment_devDependencies": "vite = dev server + build tool; @vitejs/plugin-react = enables JSX and Fast Refresh. Dev-only: they are not shipped in the built site."
 }

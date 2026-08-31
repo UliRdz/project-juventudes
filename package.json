@@ -1,25 +1,27 @@
 {
-  "_comment_file": "Frontend dependency manifest. Node equivalent of requirements.txt: 'npm install' installs these into node_modules. JSON forbids // comments, so notes live in _comment_* keys (ignored by npm) and in the README.",
-  "name": "scholarship-network-frontend",
+  "name": "scholarship-network-backend",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview"
+    "dev": "nodemon server.js",
+    "start": "node server.js"
   },
-  "_comment_scripts": "'dev' = local hot-reloading server on :5173; 'build' = produce the static files in dist/ that GitHub Pages serves; 'preview' = serve the built dist/ locally to test the production bundle.",
   "dependencies": {
-    "leaflet": "^1.9.4",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "react-leaflet": "^4.2.1"
+    "cors": "^2.8.6",
+    "dotenv": "^16.6.1",
+    "express": "^4.22.2",
+    "pg": "^8.23.0"
   },
-  "_comment_dependencies": "react + react-dom = the UI library and its DOM renderer; leaflet = the map engine; react-leaflet = React bindings for Leaflet used by the Day 3 map. NOTE: react-leaflet 4.x is paired with React 18 on purpose (react-leaflet 5 requires React 19).",
   "devDependencies": {
-    "@vitejs/plugin-react": "^4.3.4",
-    "vite": "^5.4.11"
+    "nodemon": "^3.1.14"
   },
-  "_comment_devDependencies": "vite = dev server + build tool; @vitejs/plugin-react = enables JSX and Fast Refresh. Dev-only: they are not shipped in the built site."
+  "engines": {
+    "node": ">=18"
+  },
+  "description": "",
+  "main": "server.js",
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
 }

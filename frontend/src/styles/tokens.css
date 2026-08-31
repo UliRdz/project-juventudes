@@ -1,0 +1,339 @@
+/* src/styles/tokens.css */
+/* PURPOSE: Encode the brand palette and a few sizing values as CSS variables so
+   the whole app pulls colors from one place instead of hard-coding hex values. */
+/* INTENDED OUTPUT LINK: these variables drive the visual identity — the Deep Blue
+   active country on the map, the button colors, the card backgrounds — so a brand
+   change here updates every screen at once. */
+
+:root {                          /* :root = the document top level; variables here are global to the whole app. */
+  /* ---- Brand palette ---- */
+  --color-primary:   #0B4F81;    /* Deep Blue: primary buttons (Submit/Continue) and the ACTIVE country on the map. */
+  --color-secondary: #3A79B4;    /* Medium Blue: secondary buttons (View/Details), links, and admin table headers. */
+  --color-accent:    #A8C8E6;    /* Light Blue: hover states on the map and UI highlights/selections. */
+
+  /* ---- Neutrals ---- */
+  --color-bg:        #FFFFFF;    /* Main page background. */
+  --color-surface:   #F5F5F5;    /* Card / modal / section background to separate content from the page. */
+  --color-border:    #E6E6E6;    /* Soft gray borders between sections and cards. */
+  --color-disabled:  #E6E6E6;    /* Background for disabled controls (e.g. map before login). */
+
+  /* ---- Text ---- */
+  --color-text:      #1A1A1A;    /* Default body text color (near-black for readability). */
+  --color-text-muted:#5A5A5A;    /* Secondary text: captions, disabled labels, helper text. */
+
+  /* ---- Sizing ---- */
+  --radius: 10px;                /* Shared corner radius so buttons/cards look consistent. */
+  --space:  8px;                 /* Base spacing unit; multiply (8/16/24) for consistent gaps. */
+}                                /* End :root variable block. */
+
+/* Reusable button classes so components just add class="btn btn-primary". */
+.btn-primary   { background: var(--color-primary);   color: #fff; } /* Deep Blue filled button for the main action on a screen. */
+.btn-secondary { background: var(--color-secondary); color: #fff; } /* Medium Blue button for secondary actions like "Details"/"Chat". */
+.btn:disabled  { background: var(--color-disabled);  color: var(--color-text-muted); } /* Greyed-out look for disabled buttons. */
+
+/* ============================ DAY 3: MAP & DUAL POPUP =======================
+   PURPOSE: Layout for the interactive map screen and the two-column popup.
+   INTENDED OUTPUT LINK: turns the DualPopup markup into the specified layout —
+   scholarships scrolling on the LEFT, students on the RIGHT — using the same
+   brand tokens declared above so colors stay consistent. */
+
+.dual-popup {                                  /* The container opened by a country click. */
+  display: grid;                               /* Grid gives us the two side-by-side panels. */
+  grid-template-columns: 1fr 1fr;              /* Two equal columns: left = becas, right = estudiantes. */
+  gap: calc(var(--space) * 2);                 /* 16px gutter between the panels. */
+  position: relative;                          /* Anchor point for the absolutely-positioned close button. */
+  background: var(--color-bg);                 /* White surface so it reads as a panel over the map. */
+  border: 1px solid var(--color-border);       /* Soft gray outline. */
+  border-radius: var(--radius);                /* Match the app's rounded corners. */
+  padding: calc(var(--space) * 2);             /* Inner breathing room. */
+  margin-top: calc(var(--space) * 2);          /* Space between the map and the popup. */
+}
+
+@media (max-width: 700px) {                    /* On phones the two columns don't fit side by side... */
+  .dual-popup { grid-template-columns: 1fr; }  /* ...so stack them into a single column. */
+}
+
+.popup-close {                                 /* The "×" dismiss button. */
+  position: absolute;                          /* Pin it to the popup's corner. */
+  top: var(--space);                           /* 8px from the top. */
+  right: var(--space);                         /* 8px from the right. */
+  border: none;                                /* Flat, icon-like appearance. */
+  background: transparent;                     /* No filled background. */
+  font-size: 1.5rem;                           /* Large enough to be an easy tap target. */
+  cursor: pointer;                             /* Pointer cursor signals it's clickable. */
+  color: var(--color-text-muted);              /* Muted so it doesn't compete with content. */
+}
+
+.panel-left, .panel-right {                    /* Both scrollable columns. */
+  max-height: 60vh;                            /* Cap the height so the page doesn't grow endlessly... */
+  overflow-y: auto;                            /* ...and scroll inside the panel instead (spec: scrollable sections). */
+  padding-right: var(--space);                 /* Keep text off the scrollbar. */
+}
+
+.scholarship-card, .user-card {                /* Shared card styling for both panels. */
+  background: var(--color-surface);            /* Soft gray card background (design system). */
+  border: 1px solid var(--color-border);       /* Subtle separation from the page. */
+  border-radius: var(--radius);                /* Rounded corners. */
+  padding: var(--space);                       /* Inner spacing. */
+  margin-bottom: var(--space);                 /* Gap between stacked cards. */
+}
+
+.user-card {                                   /* User cards add a horizontal layout. */
+  display: flex;                               /* Avatar | info | Chat button in a row. */
+  align-items: center;                         /* Vertically center the three parts. */
+  gap: var(--space);                           /* Space between them. */
+}
+
+.user-info { flex: 1; }                        /* The middle text block absorbs leftover width, pushing Chat to the right. */
+
+.avatar {                                      /* Profile photo on a user card. */
+  width: 48px;                                 /* Fixed size keeps every row aligned. */
+  height: 48px;                                /* Equal height/width is required for a perfect circle. */
+  border-radius: 50%;                          /* Circular avatar (per the spec). */
+  object-fit: cover;                           /* Crop rather than distort non-square uploads. */
+  border: 2px solid var(--color-accent);       /* Light Blue ring ties it to the brand. */
+}
+
+.badge-active, .badge-inactive {               /* Status pill on a scholarship card. */
+  display: inline-block;                       /* Allows padding while flowing inline with text. */
+  padding: 2px 8px;                            /* Compact pill shape. */
+  border-radius: 999px;                        /* Fully rounded ends. */
+  font-size: 0.75rem;                          /* Small, secondary information. */
+  margin-right: var(--space);                  /* Space before the "Aplicar" link. */
+}
+.badge-active   { background: var(--color-primary); color: #fff; }                     /* Deep Blue = currently open. */
+.badge-inactive { background: var(--color-disabled); color: var(--color-text-muted); } /* Gray = closed/expired. */
+
+.muted { color: var(--color-text-muted); font-size: 0.9rem; margin: 2px 0; } /* Secondary text: cities, emails, empty states. */
+
+.card {                                        /* Generic form card used by the auth/profile components. */
+  background: var(--color-surface);            /* Same surface treatment as other cards. */
+  border: 1px solid var(--color-border);       /* Consistent border. */
+  border-radius: var(--radius);                /* Consistent radius. */
+  padding: calc(var(--space) * 2);             /* Roomier padding for forms. */
+  margin-bottom: calc(var(--space) * 2);       /* Separation between stacked cards. */
+}
+
+.card input, .card select, .card textarea {    /* Form controls inside a card. */
+  display: block;                              /* One field per line. */
+  width: 100%;                                 /* Fill the card width. */
+  box-sizing: border-box;                      /* Include padding in the width so fields don't overflow. */
+  margin-bottom: var(--space);                 /* Vertical rhythm between fields. */
+  padding: var(--space);                       /* Comfortable click/tap target. */
+  border: 1px solid var(--color-border);       /* Matches the card border. */
+  border-radius: var(--radius);                /* Matches the card radius. */
+  font-size: 1rem;                             /* Prevents mobile browsers from auto-zooming on focus. */
+}
+
+.btn {                                         /* Base button styling shared by primary/secondary. */
+  border: none;                                /* Flat design. */
+  border-radius: var(--radius);                /* Rounded to match cards. */
+  padding: var(--space) calc(var(--space) * 2);/* Vertical 8px / horizontal 16px. */
+  font-size: 1rem;                             /* Readable label size. */
+  cursor: pointer;                             /* Signals interactivity. */
+}
+
+/* ============================ DAY 4: CHAT WIDGET ============================
+   PURPOSE: The bottom-overlay chat window opened from a user card's Chat button.
+   INTENDED OUTPUT LINK: implements the spec's "chat opens at bottom overlay" —
+   floating above the map so a conversation never navigates the user away. */
+
+.chat-widget {                                 /* The floating chat panel. */
+  position: fixed;                             /* Fixed to the viewport so it stays put while the page scrolls. */
+  bottom: calc(var(--space) * 2);              /* 16px above the bottom edge. */
+  right: calc(var(--space) * 2);               /* 16px from the right edge. */
+  width: 320px;                                /* Comfortable reading width without covering the map. */
+  max-width: calc(100vw - 32px);               /* On narrow phones, shrink to fit instead of overflowing. */
+  background: var(--color-bg);                 /* White panel surface. */
+  border: 1px solid var(--color-border);       /* Soft outline. */
+  border-radius: var(--radius);                /* Match the app's rounded corners. */
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);  /* Drop shadow lifts it above the map visually. */
+  display: flex;                               /* Vertical stack: header / messages / composer. */
+  flex-direction: column;                      /* Stack children top to bottom. */
+  z-index: 1000;                               /* Above Leaflet's map layers (Leaflet uses up to ~800). */
+}
+
+.chat-header {                                 /* Title bar of the widget. */
+  display: flex;                               /* Name on the left, close button on the right. */
+  justify-content: space-between;              /* Push them to opposite ends. */
+  align-items: center;                         /* Vertically center both. */
+  padding: var(--space);                       /* Inner spacing. */
+  background: var(--color-primary);            /* Deep Blue bar = brand identity. */
+  color: #fff;                                 /* White text for contrast on the dark blue. */
+  border-radius: var(--radius) var(--radius) 0 0; /* Round only the top corners, matching the panel. */
+  font-weight: 600;                            /* Slightly bold so the name reads as a title. */
+}
+
+.chat-header button {                          /* The "×" close control. */
+  background: transparent;                     /* Blend into the blue bar. */
+  border: none;                                /* Flat icon look. */
+  color: #fff;                                 /* Match the header text. */
+  font-size: 1.25rem;                          /* Large enough to tap easily. */
+  cursor: pointer;                             /* Signals it's clickable. */
+}
+
+.dot-live, .dot-off {                          /* Small circle showing WebSocket status. */
+  display: inline-block;                       /* Allows width/height on an inline element. */
+  width: 8px;                                  /* Tiny dot. */
+  height: 8px;
+  border-radius: 50%;                          /* Perfect circle. */
+  margin-left: var(--space);                   /* Space it away from the name. */
+}
+.dot-live { background: #4ade80; }             /* Green = connected, messages arrive instantly. */
+.dot-off  { background: #9ca3af; }             /* Gray = disconnected, the 5s polling fallback is active. */
+
+.chat-messages {                               /* Scrollable conversation area. */
+  flex: 1;                                     /* Take all leftover vertical space between header and composer. */
+  padding: var(--space);                       /* Inner spacing. */
+  max-height: 300px;                           /* Cap the height so the widget never grows off-screen... */
+  overflow-y: auto;                            /* ...and scrolls internally instead. */
+  background: var(--color-surface);            /* Soft gray so message bubbles stand out. */
+}
+
+.msg {                                         /* A single message bubble. */
+  padding: 6px 10px;                           /* Compact bubble padding. */
+  border-radius: var(--radius);                /* Rounded bubble. */
+  margin-bottom: 6px;                          /* Gap between consecutive messages. */
+  max-width: 80%;                              /* Never span the full width, so alignment is visible. */
+  word-wrap: break-word;                       /* Break long unbroken strings (URLs) instead of overflowing. */
+}
+
+.msg-mine {                                    /* Messages I sent. */
+  background: var(--color-primary);            /* Deep Blue bubble. */
+  color: #fff;                                 /* White text on dark blue. */
+  margin-left: auto;                           /* Auto left margin pushes the bubble to the RIGHT. */
+}
+
+.msg-theirs {                                  /* Messages the other person sent. */
+  background: var(--color-bg);                 /* White bubble. */
+  border: 1px solid var(--color-border);       /* Outline so it's visible on the gray backdrop. */
+  color: var(--color-text);                    /* Normal dark text. */
+  margin-right: auto;                          /* Keeps the bubble on the LEFT. */
+}
+
+.chat-composer {                               /* Input row at the bottom of the widget. */
+  display: flex;                               /* Input and button side by side. */
+  gap: 6px;                                    /* Small gap between them. */
+  padding: var(--space);                       /* Inner spacing. */
+  border-top: 1px solid var(--color-border);   /* Separator line above the composer. */
+}
+
+.chat-composer input {                         /* The text field. */
+  flex: 1;                                     /* Expand to fill the row, leaving the button its natural width. */
+  padding: 6px 8px;                            /* Comfortable typing area. */
+  border: 1px solid var(--color-border);       /* Match other form controls. */
+  border-radius: var(--radius);                /* Consistent corners. */
+  font-size: 1rem;                             /* Prevents mobile auto-zoom on focus. */
+}
+
+/* ==================== PHOTO RELEASE: BRAND BAR, AVATARS, FORMS ==============
+   PURPOSE: Styling for the four things added in this release — the fixed logo in
+   the top-left corner, the enlarged avatar variants (header, profile, chat), the
+   private phone field pair, and the admin panel's new inline edit forms.
+   INTENDED OUTPUT LINK: App.jsx renders .brand-logo and .app-shell; Profile.jsx
+   renders .photo-row and .phone-row; ChatWidget.jsx and DualPopup.jsx render the
+   .avatar size variants; AdminPanel.jsx renders .admin-edit and .row-actions. */
+
+.app-shell {                                   /* The <main> wrapper used by BOTH the student app and the admin route. */
+  padding: 76px var(--space) calc(var(--space) * 3); /* Top 76px clears the fixed logo (left) and translate widget (right); sides/bottom keep the old rhythm. */
+}
+
+@media (max-width: 700px) {                    /* On phones the logo and the language chip stack closer together... */
+  .app-shell { padding-top: 96px; }            /* ...so give the content a little more headroom to avoid overlap. */
+}
+
+.brand-logo {                                  /* The always-visible mark linking to juventudesgente.guanajuato.gob.mx. */
+  position: fixed;                             /* Stays in the corner on every screen and while scrolling ("at all times"). */
+  top: 30px;                                   /* Same 12px inset as the translate widget so the two corners look balanced. */
+  left: 30px;                                  /* TOP-LEFT of the screen, as requested. */
+  z-index: 1100;                               /* Above the Leaflet map (~800), level with the language chip. */
+  display: block;                              /* Block so the anchor takes the image's size exactly (no inline gap). */
+  line-height: 0;                              /* Removes the descender space an inline image would add below the logo. */
+  border-radius: var(--radius);                /* Rounded to match every other surface. */
+}
+
+.brand-logo img {                              /* The logo bitmap itself (frontend/public/logo.png). */
+  height: 100px;                                /* Fixed height keeps the header alignment stable whatever the source resolution. */
+  width: auto;                                 /* Preserve the aspect ratio of whichever logo file is dropped in. */
+  display: block;                              /* Avoids the inline-image baseline gap. */
+  border-radius: var(--radius);                /* Softens square logos so they match the UI. */
+}
+
+@media (max-width: 700px) {                    /* Phones have far less horizontal room... */
+  .brand-logo img { height: 40px; }            /* ...so shrink the mark rather than let it crowd the language chip. */
+}
+
+.avatar-xs { width: 24px; height: 24px; border-width: 1px; vertical-align: middle; margin-right: 6px; } /* Chat header avatar: small enough to sit inside the title bar next to the name. */
+.avatar-sm { width: 34px; height: 34px; }      /* App header avatar: shows the logged-in user their own uploaded photo. */
+.avatar-lg { width: 88px; height: 88px; }      /* Profile page avatar: large enough to judge the crop before saving. */
+
+.photo-row {                                   /* Profile.jsx: avatar beside the "Cambiar foto" button. */
+  display: flex;                               /* Horizontal layout. */
+  align-items: center;                         /* Vertically center the picture against the button block. */
+  gap: calc(var(--space) * 2);                 /* 16px between the image and the actions. */
+  margin-bottom: calc(var(--space) * 2);       /* Separate the photo block from the fields below it. */
+}
+
+.photo-actions { display: flex; flex-direction: column; gap: 4px; } /* Button stacked over its "JPG o PNG, máximo 5 MB" hint. */
+.photo-actions .muted { margin: 0; }           /* Kill the default .muted margin so the hint hugs the button. */
+
+.section-title {                               /* "Contacto privado" heading inside a form card. */
+  margin: calc(var(--space) * 2) 0 4px;        /* Clear space above, tight below so its explanatory line stays attached. */
+  color: var(--color-primary);                 /* Deep Blue ties section headings to the brand. */
+  font-size: 1rem;                             /* Same size as body text: it is a divider, not a page title. */
+}
+
+.phone-row {                                   /* The country-code + number pair (Register.jsx and Profile.jsx). */
+  display: flex;                               /* Side by side on one line. */
+  gap: var(--space);                           /* 8px between the two inputs. */
+}
+
+/* The two rules below beat `.card input { width: 100% }` because a class selector
+   plus an element selector is more specific than the element selector alone. */
+.card .phone-row input { margin-bottom: var(--space); } /* Keep the shared vertical rhythm inside the flex row. */
+.card .phone-code   { flex: 0 0 90px; width: 90px; }    /* Fixed narrow column: a dialing code is never longer than "+000". */
+.card .phone-number { flex: 1; width: auto; }           /* The number takes all remaining width. */
+
+.admin-edit {                                  /* AdminPanel.jsx: the inline edit form revealed under a user or scholarship row. */
+  border-top: 1px dashed var(--color-border);  /* Dashed rule signals "this belongs to the row above", not a new record. */
+  margin-top: var(--space);                    /* Gap between the row summary and its editor. */
+  padding-top: var(--space);                   /* Matching inner space below the rule. */
+}
+
+.admin-edit .grid-2 {                          /* Two-column field layout so a long edit form stays scannable. */
+  display: grid;                               /* Grid handles uneven field heights better than flex here. */
+  grid-template-columns: 1fr 1fr;              /* Two equal columns. */
+  gap: 0 var(--space);                         /* No extra row gap (inputs already carry margin-bottom); 8px between columns. */
+}
+
+@media (max-width: 700px) {                    /* Two columns of inputs are unusable on a phone... */
+  .admin-edit .grid-2 { grid-template-columns: 1fr; } /* ...so collapse to a single column. */
+}
+
+.admin-edit label {                            /* Field labels in the admin editor (the student forms rely on placeholders). */
+  display: block;                              /* One label per line, directly above its input. */
+  font-size: 0.8rem;                           /* Small: it is metadata about the field, not content. */
+  color: var(--color-text-muted);              /* Muted so labels never compete with the values. */
+  margin-bottom: 2px;                          /* Tight coupling to the input underneath. */
+}
+
+.row-actions {                                 /* The button strip on every admin row. */
+  display: flex;                               /* Buttons in a row... */
+  gap: 6px;                                    /* ...with a small consistent gap... */
+  flex-wrap: wrap;                             /* ...wrapping instead of overflowing on narrow screens. */
+  margin-top: var(--space);                    /* Space between the row's text and its controls. */
+}
+
+.btn-danger {                                  /* Destructive actions: permanently deleting a user or a scholarship. */
+  background: #b3261e;                         /* Deliberately outside the blue palette: destructive actions must not look routine. */
+  color: #fff;                                 /* White label for contrast. */
+}
+
+.btn-sm { padding: 4px 10px; font-size: 0.85rem; } /* Compact button size so several actions fit on one admin row. */
+
+.chat-peer {                                   /* ChatWidget header: avatar + name + live dot on one baseline. */
+  display: inline-flex;                        /* Inline-flex keeps the group inside the space-between header layout. */
+  align-items: center;                         /* Vertically centers the 24px avatar against the text. */
+  min-width: 0;                                /* Allows a long name to shrink instead of pushing the × button off the bar. */
+  overflow: hidden;                            /* Clips an over-long name rather than breaking the header. */
+}

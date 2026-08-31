@@ -1,0 +1,10 @@
+/* ADD ONLY if your existing tokens.css does not already define .avatar-placeholder. */
+/* MODIFIED: Give missing/stale profile photos the same circular footprint as real avatars without showing a browser broken-image icon. */
+.avatar-placeholder {
+  display: grid; /* MODIFIED: Center the fallback initial horizontally and vertically. */
+  place-items: center; /* MODIFIED: Keep the initial centered at every responsive card size. */
+  flex: 0 0 auto; /* MODIFIED: Prevent the fallback circle from shrinking beside long student details. */
+  background: var(--color-primary); /* MODIFIED: Use the existing brand token rather than introducing a second colour system. */
+  color: #fff; /* MODIFIED: Maintain readable contrast over the primary background. */
+  font-weight: 700; /* MODIFIED: Keep the single-letter fallback legible at avatar size. */
+}

@@ -4,16 +4,16 @@
 -- INTENDED OUTPUT LINK: gives the Day 3 map something to display (a scholarship
 -- and a country with a user) before real registration exists.
 
--- One demo admin. NOTE: password_hash below is a PLACEHOLDER, not a real bcrypt
--- hash — replace it in Day 2 once bcrypt is wired, or the admin login won't work.
+-- One demo admin. The hash below is a REAL bcrypt hash of the password 'demo1234'
+-- (cost 12), so this account can actually log in. Change it before production.
 INSERT INTO admins (email, password_hash)                 -- Insert a single admin row...
-VALUES ('admin@example.com', 'REPLACE_WITH_BCRYPT_HASH'); -- ...used to test the Day 5 admin panel login.
+VALUES ('admin@example.com', '$2b$12$W344fDtHPXNxlb0FckQnKOchsqcO/UviH1wBH798kD2JADqhxn.LC'); -- password = 'demo1234' (Day 5 admin login).
 
 -- One demo user located in Mexico so the map's right panel has a card to show.
 INSERT INTO users (email, password_hash, first_name, last_name, current_country, current_city, status)
 VALUES (
   'demo@example.com',            -- Demo login email.
-  'REPLACE_WITH_BCRYPT_HASH',    -- Placeholder hash; replace once Day 2 hashing exists.
+  '$2b$12$W344fDtHPXNxlb0FckQnKOchsqcO/UviH1wBH798kD2JADqhxn.LC',    -- Real bcrypt hash; password = 'demo1234'.
   'Demo',                        -- first_name shown on the user card.
   'Estudiante',                  -- last_name shown on the user card.
   'Mexico',                      -- current_country: clicking Mexico on the map will surface this user (Day 3).
