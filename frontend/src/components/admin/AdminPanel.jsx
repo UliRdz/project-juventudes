@@ -55,6 +55,7 @@ export default function AdminPanel() {
           ["dashboard", "Resumen"],
           ["users", "Usuarios"],
           ["scholarships", "Becas"],
+          ["tickets", "Solicitudes"],   // NEW tab: the "Chat requests" queue — support tickets opened from the student "Ayuda" button.
           ["chats", "Moderación"],
           ["settings", "Sistema"],
         ].map(([key, label]) => (
@@ -72,6 +73,7 @@ export default function AdminPanel() {
       {tab === "dashboard" && <Dashboard token={token} />}
       {tab === "users" && <UsersTab token={token} />}
       {tab === "scholarships" && <ScholarshipsTab token={token} />}
+      {tab === "tickets" && <TicketsTab token={token} />}
       {tab === "chats" && <ChatsTab token={token} />}
       {tab === "settings" && <SettingsTab token={token} />}
     </div>
@@ -127,6 +129,12 @@ function Dashboard({ token }) {
     ["Países con usuarios", d.countries],                  // Distinct countries represented.
     ["Chats pendientes", d.pending_chats],                 // Unread messages platform-wide.
     ["Última actualización", d.last_api_update ? new Date(d.last_api_update).toLocaleString() : "—"], // Last scholarship change.
+    // NEW (this patch): the three support-ticket KPIs. They are the throughput
+    // measure for the "Ayuda" channel — "abiertas" is the backlog an admin has to
+    // clear, "en proceso" is current load, "cerradas" is cumulative resolution.
+    ["Solicitudes abiertas", d.tickets_open ?? 0],          // ?? 0 so an older backend that doesn't send the field renders 0, not "undefined".
+    ["Solicitudes en proceso", d.tickets_in_progress ?? 0], // Being worked on right now.
+    ["Solicitudes cerradas", d.tickets_closed ?? 0],        // Resolved to date.
   ];
 
   return (
@@ -149,6 +157,7 @@ function UsersTab({ token }) {
   const [q, setQ] = useState("");          // Search term.
   const [error, setError] = useState("");  // Error message.
   const [editingId, setEditingId] = useState(null); // NEW: which row has its edit form open (null = none). Only one at a time keeps the table readable.
+  const [tempPassword, setTempPassword] = useState(null); // NEW (this patch): { email, password } shown once after a reset; null hides the notice.
 
   function load() {                                                     // (Re)load the list with the current search.
     api(`/admin/users?q=${encodeURIComponent(q)}`, { token })           // encodeURIComponent keeps odd terms URL-safe.
@@ -162,6 +171,27 @@ function UsersTab({ token }) {
     try {
       await api(`/admin/users/${id}/${path}`, { method: "PATCH", token, body }); // Perform the action...
       load();                                                            // ...then refresh so the table shows the new state.
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+  // NEW (this patch): reset a forgotten password. The admin never types a
+  // password: the server generates a random one, stores only its bcrypt hash, and
+  // returns the plaintext EXACTLY ONCE in this response. It is held in component
+  // state (not persisted anywhere) and disappears when the admin dismisses it or
+  // navigates away — so it cannot be recovered from the UI later.
+  async function resetPassword(u) {
+    const ok = confirm(                                                 // Confirm: this immediately invalidates their current password.
+      `¿Reiniciar la contraseña de ${u.first_name} ${u.last_name} (${u.email})?\n\n` +
+      "Se generará una contraseña temporal que deberás entregarle por un canal seguro.\n" + // Tells the admin what they will have to do next.
+      "Su contraseña actual dejará de funcionar de inmediato."          // States the consequence for the user.
+    );
+    if (!ok) return;                                                     // Cancelled.
+
+    try {
+      const res = await api(`/admin/users/${u.id}/reset-password`, { method: "POST", token }); // Generates + stores the hash, returns the plaintext once.
+      setTempPassword({ email: res.email, password: res.temporary_password }); // Surface it for copying.
     } catch (e) {
       setError(e.message);
     }
@@ -210,6 +240,28 @@ function UsersTab({ token }) {
       </div>
       {error && <p style={{ color: "crimson" }}>{error}</p>}
 
+      {tempPassword && (                                                  // Shown only right after a reset.
+        <div className="temp-password">                                   {/* Highlighted panel so it can't be missed or skimmed past. */}
+          <strong>Contraseña temporal generada</strong>
+          <p className="muted">
+            Para <strong>{tempPassword.email}</strong>. Se muestra una sola vez: cópiala ahora
+            y entrégala por un canal seguro. No queda registrada en ningún lado. {/* Sets the expectation before they click away and lose it. */}
+          </p>
+          <code className="temp-password-value">{tempPassword.password}</code> {/* Monospace so ambiguous characters (l/1, O/0) are readable. */}
+          <div className="row-actions">
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={() => navigator.clipboard?.writeText(tempPassword.password)} // Optional chaining: the Clipboard API is unavailable on insecure origins.
+            >
+              Copiar
+            </button>
+            <button className="btn btn-secondary btn-sm" onClick={() => setTempPassword(null)}>
+              Ya la entregué                                             {/* Dismissing it is the admin confirming they no longer need it on screen. */}
+            </button>
+          </div>
+        </div>
+      )}
+
       {users.map((u) => (
         <div className="card" key={u.id}>                                 {/* One card per user. */}
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}> {/* Row header: avatar beside the identity block. */}
@@ -246,6 +298,10 @@ function UsersTab({ token }) {
               {u.chat_disabled ? "Permitir chat" : "Bloquear chat"}       {/* Toggle the mute. */}
             </button>
             <button className="btn btn-secondary btn-sm" onClick={() => act(u.id, "reset-2fa")}>Reiniciar 2FA</button> {/* Unlock a user. */}
+            {/* NEW: password reset. Kept SEPARATE from "Reiniciar 2FA" on purpose —
+                a forgotten password and a lost phone are different problems, and
+                each is audited independently. */}
+            <button className="btn btn-secondary btn-sm" onClick={() => resetPassword(u)}>Reiniciar contraseña</button>
             <button className="btn btn-danger btn-sm" onClick={() => removeUser(u)}>Eliminar</button> {/* NEW: permanent delete, styled red so it never looks routine. */}
           </div>
 
@@ -378,66 +434,135 @@ function UserEditForm({ token, user, onCancel, onSaved }) {
 // ---------------------------------------------------------------------------
 // Scholarship CMS: manual entry form + list with source badges, EDIT and delete.
 // ---------------------------------------------------------------------------
+// Scholarship CMS: list with source badges, a DETAIL/EDIT page, and delete.
+// ---------------------------------------------------------------------------
+// CHANGE (this patch) — THE EMPTY-LIST BUG FIX:
+// This tab used to call GET /scholarships, which is guarded by requireAuth and
+// therefore verifies the token against JWT_SECRET. The admin panel holds an ADMIN
+// token signed with ADMIN_JWT_SECRET, and render.yaml generates those two secrets
+// independently — so in production they differ, the request came back 401, and the
+// list rendered empty. It now calls GET /admin/scholarships (requireAdmin), which
+// is the RIGHT token for this surface and additionally returns INACTIVE rows, so an
+// administrator can see and re-activate what they previously hid.
+//
+// The editor is also no longer an inline strip: "Editar" now opens a full detail
+// page that replaces the list, which is what makes a long form usable.
 function ScholarshipsTab({ token }) {
-  const [list, setList] = useState([]);      // All scholarships shown to the admin.
+  const [list, setList] = useState([]);      // All scholarships, active and inactive.
   const [error, setError] = useState("");    // Error message.
-  const [editing, setEditing] = useState(null); // NEW: the scholarship row currently being edited (null = the form is in "create" mode).
+  const [q, setQ] = useState("");            // Free-text search across institution and country.
+  const [editing, setEditing] = useState(null); // The row open in the detail page (null = showing the list).
+  const [creating, setCreating] = useState(false); // True when the detail page is in "new entry" mode.
 
-  function load() {                                                        // Load the scholarship list.
-    // Reads use the STUDENT token route, so the admin panel reuses the same
-    // GET /scholarships endpoint (reads stay on requireAuth by design).
-    api("/scholarships", { token }).then(setList).catch((e) => setError(e.message));
+  function load() {                                                        // (Re)load the catalogue with the current search.
+    api(`/admin/scholarships?q=${encodeURIComponent(q)}`, { token })       // THE FIX: the admin endpoint, with the admin token.
+      .then(setList)
+      .catch((e) => setError(e.message));
   }
 
   useEffect(() => { load(); }, []);                                        // Load on open.
 
-  async function remove(id) {                                              // Delete a scholarship.
-    if (!confirm("¿Eliminar esta beca?")) return;                          // Confirm first: deletion is permanent.
+  async function remove(s) {                                               // Delete a scholarship.
+    const ok = confirm(                                                    // Name the row so the admin cannot delete the wrong one by mistake.
+      `¿Eliminar la beca "${s.institution_name}" (${s.country})?\n\n` +
+      "Esta acción no se puede deshacer.\n" +
+      "Si solo quieres ocultarla a los estudiantes, edítala y ponla como \"Inactiva\"." // Points at the reversible alternative first.
+    );
+    if (!ok) return;                                                       // Cancelled.
+
     try {
-      await api(`/scholarships/${id}`, { method: "DELETE", token });        // Admin-only route.
-      if (editing?.id === id) setEditing(null);                             // If the deleted row was open in the form, reset it to create mode.
-      load();                                                              // Refresh the list.
+      await api(`/scholarships/${s.id}`, { method: "DELETE", token });      // DELETE is already requireAdmin, so this route was never broken.
+      if (editing?.id === s.id) setEditing(null);                           // If the deleted row was open, return to the list.
+      load();                                                              // Refresh.
     } catch (e) {
       setError(e.message);
     }
   }
 
+  // ---- DETAIL PAGE: replaces the list entirely while open ----
+  // Rendering one view OR the other (rather than the form above the list) means the
+  // admin's attention is on a single record, and the page cannot scroll them away
+  // from the form they are filling in.
+  if (editing || creating) {
+    return (
+      <div>
+        <div className="row-actions" style={{ marginBottom: 12 }}>
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={() => { setEditing(null); setCreating(false); }}       // Leave the detail page without saving.
+          >
+            ← Volver al listado
+          </button>
+        </div>
+
+        <ScholarshipForm
+          key={editing?.id || "new"}                                        // Remount on selection change so the fields repopulate.
+          token={token}                                                     // Admin token; a student token would get 403.
+          initial={editing}                                                 // null = blank create form; a row = pre-filled edit form.
+          onSaved={() => { setEditing(null); setCreating(false); load(); }}  // Return to the refreshed list after saving.
+          onCancelEdit={() => { setEditing(null); setCreating(false); }}     // Same for an explicit cancel.
+        />
+
+        {editing && (                                                       // Metadata that is read-only, so it belongs outside the form.
+          <div className="card">
+            <h4 className="section-title">Detalles del registro</h4>
+            <p className="muted">
+              Origen: <strong>{editing.source === "manual" ? "Manual" : "API"}</strong>
+              {editing.created_by_email && <> · Creada por {editing.created_by_email}</>} {/* Only manual rows have an author. */}
+              {editing.updated_at && <> · Última edición {new Date(editing.updated_at).toLocaleString()}</>}
+            </p>
+            {editing.source === "api" && (                                   // Important warning, not decoration...
+              <p className="muted">
+                Esta beca proviene de la importación automática. La actualización diaria
+                puede sobrescribir estos cambios. {/* ...because scheduler.js upserts api rows on a 24h cycle. */}
+              </p>
+            )}
+            <div className="row-actions">
+              <button className="btn btn-danger btn-sm" onClick={() => remove(editing)}>Eliminar esta beca</button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ---- LIST VIEW ----
   return (
     <div>
-      {/* One form serves both jobs. Passing `initial` switches it to edit mode and
-          makes it issue PUT /scholarships/:id instead of POST /scholarships. The
-          `key` forces React to remount it when the selection changes, which is what
-          reloads the fields with the newly chosen row. */}
-      <ScholarshipForm
-        key={editing?.id || "new"}                                           // Remount on selection change -> fields repopulate.
-        token={token}                                                        // Admin token; a student token would get 403.
-        initial={editing}                                                    // null = blank create form; a row = pre-filled edit form.
-        onSaved={() => { setEditing(null); load(); }}                        // After saving, return to create mode and refresh the list.
-        onCancelEdit={() => setEditing(null)}                                // "Cancelar edición" returns to create mode without saving.
-      />
+      <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+        <input placeholder="Buscar institución o país…" value={q} onChange={(e) => setQ(e.target.value)} /> {/* Search box. */}
+        <button className="btn btn-secondary" onClick={load}>Buscar</button>                                 {/* Run the search. */}
+        <button className="btn btn-primary" onClick={() => setCreating(true)}>Agregar beca</button>          {/* Opens the detail page in create mode. */}
+      </div>
       {error && <p style={{ color: "crimson" }}>{error}</p>}
 
-      <h3>Becas registradas ({list.length})</h3>                            {/* Count for quick reference. */}
+      <h3>Becas registradas ({list.length})</h3>                            {/* Count now reflects ALL rows, including inactive ones. */}
+      {list.length === 0 && (                                               // Empty state...
+        <p className="muted">
+          No hay becas registradas. Usa “Agregar beca” para crear la primera. {/* ...which is now a real empty catalogue rather than a silent 401. */}
+        </p>
+      )}
+
       {list.map((s) => (
         <div className="card" key={s.id}>
           <strong>{s.institution_name}</strong>                             {/* Institution. */}
-          {/* The source badge is why the manual/API split is useful in practice:
-              an admin can instantly see which rows they own and may delete. */}
+          {/* Provenance badge: an admin can instantly see which rows they own and
+              may safely edit, versus imported rows the refresh may overwrite. */}
           <span className={s.source === "manual" ? "badge-active" : "badge-inactive"} style={{ marginLeft: 8 }}>
-            {s.source === "manual" ? "Manual" : "API"}                      {/* Provenance badge. */}
+            {s.source === "manual" ? "Manual" : "API"}
           </span>
-          <p className="muted">{s.country} · {s.category === "high_school" ? "Preparatoria" : "Universidad"}</p> {/* Where/what. */}
-          <div className="row-actions">                                     {/* Button strip for this row. */}
-            <button
-              className="btn btn-secondary btn-sm"                          // NEW: loads this row into the form at the top of the tab.
-              onClick={() => {
-                setEditing(s);                                              // Select the row -> the form remounts pre-filled.
-                window.scrollTo({ top: 0, behavior: "smooth" });            // Scroll back up so the admin can see the form they just filled.
-              }}
-            >
-              Editar
-            </button>
-            <button className="btn btn-danger btn-sm" onClick={() => remove(s.id)}>Eliminar</button> {/* Delete action (now red, matching the users tab). */}
+          {/* Visibility badge — NEW, and only meaningful now that inactive rows
+              actually reach this list. */}
+          <span className={s.status === "active" ? "badge-active" : "badge-inactive"} style={{ marginLeft: 6 }}>
+            {s.status === "active" ? "Activa" : "Inactiva"}
+          </span>
+          <p className="muted">
+            {s.country} · {s.category === "high_school" ? "Preparatoria" : "Universidad"} {/* Where / what level. */}
+            {s.end_date && <> · cierra {String(s.end_date).slice(0, 10)}</>}                {/* Closing date, trimmed of the timestamp. */}
+          </p>
+          <div className="row-actions">
+            <button className="btn btn-secondary btn-sm" onClick={() => setEditing(s)}>Editar detalles</button> {/* Opens the detail page. */}
+            <button className="btn btn-danger btn-sm" onClick={() => remove(s)}>Eliminar</button>              {/* Permanent delete. */}
           </div>
         </div>
       ))}
@@ -446,39 +571,86 @@ function ScholarshipsTab({ token }) {
 }
 
 // ---------------------------------------------------------------------------
-// Chat moderation: browse recent messages and delete abusive ones.
+// TicketsTab (NEW): the "Chat requests" queue.
 // ---------------------------------------------------------------------------
-function ChatsTab({ token }) {
-  const [chats, setChats] = useState([]);   // Recent messages.
-  const [error, setError] = useState("");   // Error message.
+// Support tickets opened from the student "Ayuda" button, organised by the three
+// lifecycle states the dashboard KPIs count. Selecting a ticket opens its thread,
+// where the admin replies and moves it through the lifecycle.
+function TicketsTab({ token }) {
+  const [status, setStatus] = useState("open"); // Which queue is showing; "open" first because that is the backlog.
+  const [list, setList] = useState([]);         // Ticket summaries for the selected queue.
+  const [activeId, setActiveId] = useState(null); // Which ticket is open in the thread view (null = list).
+  const [error, setError] = useState("");       // Error message.
 
-  function load() {                                                      // Load the moderation log.
-    api("/admin/chats?limit=50", { token }).then(setChats).catch((e) => setError(e.message));
+  function load(s = status) {                                              // (Re)load the queue.
+    api(`/admin/tickets?status=${encodeURIComponent(s)}`, { token })       // '' would mean "all"; the tabs always pass one state.
+      .then(setList)
+      .catch((e) => setError(e.message));
   }
 
-  useEffect(() => { load(); }, []);                                      // Load on open.
+  useEffect(() => { load(status); }, [status]);                             // Reload whenever the queue changes.
 
-  async function remove(id) {                                            // Delete an abusive message.
-    if (!confirm("¿Eliminar este mensaje?")) return;                     // Confirm: irreversible.
-    try {
-      await api(`/admin/chats/${id}`, { method: "DELETE", token });       // Admin-only deletion.
-      load();                                                            // Refresh.
-    } catch (e) {
-      setError(e.message);
-    }
+  // A ticket open in the thread view delegates entirely to TicketThread.
+  if (activeId) {
+    return (
+      <TicketThread
+        token={token}                                                       // Admin token.
+        ticketId={activeId}                                                 // Which ticket to load.
+        onBack={() => { setActiveId(null); load(status); }}                  // Returning refreshes the queue, since replying may have changed the status.
+      />
+    );
   }
 
   return (
     <div>
+      <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+        {[                                                                  // The three queues, in lifecycle order.
+          ["open", "Abiertas"],                                             // Nobody has replied yet.
+          ["in_progress", "En proceso"],                                    // An admin has replied.
+          ["closed", "Cerradas"],                                           // Resolved.
+        ].map(([key, label]) => (
+          <button
+            key={key}
+            className={status === key ? "btn btn-primary btn-sm" : "btn btn-secondary btn-sm"} // Highlight the active queue.
+            onClick={() => setStatus(key)}                                  // Switch queue -> the effect above reloads.
+          >
+            {label}
+          </button>
+        ))}
+        <button className="btn btn-secondary btn-sm" onClick={() => load(status)}>Actualizar</button> {/* Manual refresh. */}
+      </div>
       {error && <p style={{ color: "crimson" }}>{error}</p>}
-      <h3>Mensajes recientes</h3>
-      {chats.length === 0 && <p className="muted">No hay mensajes.</p>}   {/* Empty state. */}
-      {chats.map((c) => (
-        <div className="card" key={c.id}>
-          <p className="muted">{c.sender_email} → {c.receiver_email}</p>  {/* Who talked to whom. */}
-          <p>{c.message}</p>                                              {/* The message content under review. */}
-          <p className="muted">{new Date(c.created_at).toLocaleString()}</p> {/* When it was sent. */}
-          <button className="btn btn-danger btn-sm" onClick={() => remove(c.id)}>Eliminar</button> {/* Moderate (red, consistent with the other destructive actions). */}
+
+      {list.length === 0 && <p className="muted">No hay solicitudes en esta bandeja.</p>} {/* Empty state per queue. */}
+
+      {list.map((t) => (
+        <div className="card" key={t.id}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <img
+              src={mediaUrl(t.profile_photo_url, `${import.meta.env.BASE_URL}favicon.svg`)} // The requester's avatar, resolved through the same helper as everywhere else.
+              alt=""                                                        // Decorative: the name is next to it.
+              className="avatar avatar-sm"
+              onError={(e) => { e.currentTarget.src = `${import.meta.env.BASE_URL}favicon.svg`; }} // Degrade to the placeholder on 404.
+            />
+            <div style={{ flex: 1 }}>
+              <strong>{t.subject}</strong>                                  {/* What the ticket is about. */}
+              <p className="muted">
+                {t.first_name} {t.last_name} · {t.email}                    {/* Who opened it. */}
+                {t.current_country && <> · {t.current_country}</>}          {/* Where they are, which often matters for the answer. */}
+              </p>
+              <p className="muted">
+                {t.message_count} mensaje{t.message_count === 1 ? "" : "s"} · {/* Thread length. */}
+                {" "}{new Date(t.updated_at).toLocaleString()}              {/* Last activity. */}
+                {/* An open ticket with no admin reply is the one that needs action
+                    most urgently, so it is called out explicitly rather than left
+                    for the admin to infer from the message count. */}
+                {!t.last_admin_reply && <strong> · sin respuesta</strong>}
+              </p>
+            </div>
+          </div>
+          <div className="row-actions">
+            <button className="btn btn-secondary btn-sm" onClick={() => setActiveId(t.id)}>Abrir solicitud</button>
+          </div>
         </div>
       ))}
     </div>
@@ -486,7 +658,379 @@ function ChatsTab({ token }) {
 }
 
 // ---------------------------------------------------------------------------
-// System settings: edit config values, test SMTP, trigger a scholarship refresh.
+// TicketThread (NEW): read one ticket, reply, and move it through the lifecycle.
+// ---------------------------------------------------------------------------
+function TicketThread({ token, ticketId, onBack }) {
+  const [t, setT] = useState(null);       // The ticket: header, requester context, and messages.
+  const [reply, setReply] = useState(""); // The reply box.
+  const [error, setError] = useState(""); // Error message.
+  const [busy, setBusy] = useState(false);// True while a request is in flight.
+
+  function load() {                                                        // (Re)load the ticket.
+    api(`/admin/tickets/${ticketId}`, { token }).then(setT).catch((e) => setError(e.message));
+  }
+
+  useEffect(() => { load(); }, [ticketId]);                                // Load on open / when switching tickets.
+
+  async function send() {                                                  // Reply as the administration.
+    const body = reply.trim();                                             // Trim so whitespace-only replies are ignored.
+    if (!body) return;                                                     // Nothing to send.
+
+    setBusy(true);
+    try {
+      await api(`/admin/tickets/${ticketId}/messages`, { method: "POST", token, body: { message: body } }); // Stores the reply AND auto-advances 'open' -> 'in_progress'.
+      setReply("");                                                        // Clear the box.
+      load();                                                              // Reload so both the new message and the new status show.
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function setStatus(status) {                                       // Move the ticket through the lifecycle.
+    try {
+      await api(`/admin/tickets/${ticketId}`, { method: "PATCH", token, body: { status } }); // Validated server-side against the CHECK constraint.
+      load();                                                              // Reflect the new state.
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+  async function remove() {                                                // Delete the whole ticket (spam / duplicates / erasure request).
+    if (!confirm("¿Eliminar esta solicitud y todos sus mensajes? No se puede deshacer.")) return;
+    try {
+      await api(`/admin/tickets/${ticketId}`, { method: "DELETE", token }); // ticket_messages cascade away with it.
+      onBack();                                                            // Return to the queue, which reloads without it.
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+  if (error) return <p style={{ color: "crimson" }}>{error}</p>;            // Load failure.
+  if (!t) return <p>Cargando…</p>;                                         // Loading state.
+
+  return (
+    <div>
+      <div className="row-actions" style={{ marginBottom: 12 }}>
+        <button className="btn btn-secondary btn-sm" onClick={onBack}>← Volver a solicitudes</button>
+      </div>
+
+      <div className="card">
+        <h3 style={{ margin: 0 }}>{t.subject}</h3>                          {/* The subject as the page heading. */}
+        <p className="muted">
+          {t.category} · abierta el {new Date(t.created_at).toLocaleString()} {/* Category key + when it was opened. */}
+        </p>
+
+        {/* Requester context. Having it on the same screen as the thread is the
+            point: most tickets are resolved by acting on this person's account,
+            and the admin should not have to go hunting in the Usuarios tab. */}
+        <h4 className="section-title">Solicitante</h4>
+        <p className="muted">
+          <strong>{t.first_name} {t.last_name}</strong> · {t.email}<br />
+          {t.current_city ? `${t.current_city}, ` : ""}{t.current_country || "sin país"}
+          {t.institution_company && <> · {t.institution_company}</>}<br />
+          {t.phone_number ? `${t.phone_country_code || ""} ${t.phone_number}` : "sin teléfono"} {/* Private field, admin-only surface. */}
+          <br />
+          {t.is_active ? "Cuenta activa" : "Cuenta desactivada"} ·          {/* The three states most access tickets turn out to be about. */}
+          {t.chat_disabled ? " chat bloqueado" : " chat habilitado"} ·
+          {t.totp_enabled ? " 2FA activo" : " 2FA inactivo"}
+        </p>
+
+        <h4 className="section-title">Estado</h4>
+        <div className="row-actions">
+          {[                                                                // Explicit buttons rather than a dropdown: one click per transition.
+            ["open", "Abierta"],
+            ["in_progress", "En proceso"],
+            ["closed", "Cerrada"],
+          ].map(([key, label]) => (
+            <button
+              key={key}
+              className={t.status === key ? "btn btn-primary btn-sm" : "btn btn-secondary btn-sm"} // The current state is highlighted.
+              onClick={() => setStatus(key)}
+            >
+              {label}
+            </button>
+          ))}
+          <button className="btn btn-danger btn-sm" onClick={remove}>Eliminar solicitud</button>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="help-messages">                                     {/* Same bubble styling as the student's Help widget, so both sides look consistent. */}
+          {t.messages.map((m) => (
+            <div
+              key={m.id}
+              // Mirror of the student view: here the ADMIN's messages are "mine".
+              // The alignment comes from which author column the server populated.
+              className={m.author_admin_id ? "msg msg-mine" : "msg msg-theirs"}
+            >
+              {!m.author_admin_id && <span className="msg-label">{t.first_name}</span>} {/* Label the student's side so a long thread stays readable. */}
+              {m.message}
+            </div>
+          ))}
+        </div>
+
+        <div className="help-composer">
+          <textarea
+            rows={3}
+            placeholder="Escribe la respuesta de la administración…"
+            value={reply}
+            onChange={(e) => setReply(e.target.value)}
+          />
+          <button className="btn btn-primary" onClick={send} disabled={busy}>
+            {busy ? "Enviando…" : "Responder"}
+          </button>
+        </div>
+        <p className="muted">
+          Al responder, una solicitud “Abierta” pasa automáticamente a “En proceso”. {/* Explains the automatic transition so the status change isn't a surprise. */}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Chat moderation: CONVERSATIONS (rewritten in this patch).
+// ---------------------------------------------------------------------------
+// BEFORE: this tab listed the newest N individual messages. A moderator saw single
+// lines torn out of context, could delete one, and had no way to read a thread or
+// to intervene in it.
+// NOW: it lists CONVERSATIONS. Each row has "Revisar" (opens the full thread, where
+// the admin can read it and post an intervention note) and "Eliminar" (removes the
+// entire conversation).
+function ChatsTab({ token }) {
+  const [conversations, setConversations] = useState([]); // One row per conversation.
+  const [error, setError] = useState("");                 // Error message.
+  const [reviewing, setReviewing] = useState(null);       // { a, b } of the conversation open for review (null = list).
+
+  function load() {                                                        // (Re)load the conversation list.
+    api("/admin/chats/conversations?limit=100", { token })                 // Grouped server-side; see admin.routes.js.
+      .then(setConversations)
+      .catch((e) => setError(e.message));
+  }
+
+  useEffect(() => { load(); }, []);                                        // Load on open.
+
+  async function removeConversation(c) {                                   // Delete an entire thread.
+    const ok = confirm(
+      `¿Eliminar toda la conversación entre ${c.a_first} ${c.a_last} y ${c.b_first} ${c.b_last}?\n\n` +
+      `Se borrarán ${c.message_count} mensaje(s) en ambos sentidos. No se puede deshacer.\n` + // States the true blast radius.
+      "Si solo un mensaje es problemático, usa \"Revisar\" y elimínalo desde ahí."             // Points at the narrower tool.
+    );
+    if (!ok) return;
+
+    try {
+      await api(`/admin/chats/conversation?a=${c.pair_low}&b=${c.pair_high}`, { method: "DELETE", token }); // One indexed delete on the pair key.
+      load();                                                              // Refresh without it.
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+  // The review page delegates to its own component, which loads the full thread.
+  if (reviewing) {
+    return (
+      <AdminConversation
+        token={token}                                                       // Admin token.
+        a={reviewing.a}                                                     // Participant A.
+        b={reviewing.b}                                                     // Participant B.
+        onBack={() => { setReviewing(null); load(); }}                       // Returning refreshes counts (an intervention adds a message).
+      />
+    );
+  }
+
+  return (
+    <div>
+      <div className="row-actions" style={{ marginBottom: 12 }}>
+        <button className="btn btn-secondary btn-sm" onClick={load}>Actualizar</button> {/* Manual refresh. */}
+      </div>
+      {error && <p style={{ color: "crimson" }}>{error}</p>}
+
+      <h3>Conversaciones ({conversations.length})</h3>
+      {conversations.length === 0 && <p className="muted">No hay conversaciones.</p>} {/* Empty state. */}
+
+      {conversations.map((c) => (
+        <div className="card" key={`${c.pair_low}-${c.pair_high}`}>          {/* The pair IS the conversation's identity, so it makes a stable key. */}
+          <div className="conv-row">
+            <img
+              src={mediaUrl(c.a_photo, `${import.meta.env.BASE_URL}favicon.svg`)} // Participant A's avatar.
+              alt=""
+              className="avatar avatar-sm"
+              onError={(e) => { e.currentTarget.src = `${import.meta.env.BASE_URL}favicon.svg`; }}
+            />
+            <img
+              src={mediaUrl(c.b_photo, `${import.meta.env.BASE_URL}favicon.svg`)} // Participant B's avatar.
+              alt=""
+              className="avatar avatar-sm"
+              onError={(e) => { e.currentTarget.src = `${import.meta.env.BASE_URL}favicon.svg`; }}
+            />
+            <div style={{ flex: 1, minWidth: 0 }}>                           {/* minWidth:0 lets the preview below truncate instead of stretching the row. */}
+              <strong>
+                {c.a_first} {c.a_last} ↔ {c.b_first} {c.b_last}              {/* The two participants; the arrow signals a two-way thread. */}
+              </strong>
+              <p className="muted">{c.a_email} · {c.b_email}</p>             {/* Emails, for identification. */}
+              <p className="muted conv-preview">{c.last_message}</p>          {/* The newest line: enough to triage without opening it. */}
+              <p className="muted">
+                {c.message_count} mensaje{c.message_count === 1 ? "" : "s"} · {/* Thread length. */}
+                {" "}{new Date(c.last_at).toLocaleString()}                   {/* Last activity. */}
+                {c.unread_count > 0 && <> · {c.unread_count} sin leer</>}     {/* Unread count, useful for spotting one-sided contact. */}
+                {c.admin_notes > 0 && <strong> · ya intervenida</strong>}     {/* Flags threads that have already been moderated, so two admins don't duplicate work. */}
+              </p>
+            </div>
+          </div>
+          <div className="row-actions">
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={() => setReviewing({ a: c.pair_low, b: c.pair_high })} // Open the review page for this pair.
+            >
+              Revisar conversación
+            </button>
+            <button className="btn btn-danger btn-sm" onClick={() => removeConversation(c)}>Eliminar</button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// AdminConversation (NEW): the conversation review page.
+// ---------------------------------------------------------------------------
+// Read the full thread, delete an individual message, or post an intervention note
+// that BOTH participants see attributed to the administration. The note is stored
+// with admin_id set and sender_id/receiver_id NULL — it belongs to the conversation
+// but to neither side of it, which is why migration 004 made those columns nullable.
+function AdminConversation({ token, a, b, onBack }) {
+  const [data, setData] = useState(null);   // { participants, messages }.
+  const [note, setNote] = useState("");     // The intervention box.
+  const [error, setError] = useState("");   // Error message.
+  const [busy, setBusy] = useState(false);  // True while a request is in flight.
+
+  function load() {                                                        // (Re)load the thread.
+    api(`/admin/chats/conversation?a=${a}&b=${b}`, { token })              // Also writes a 'conversation_review' audit entry server-side.
+      .then(setData)
+      .catch((e) => setError(e.message));
+  }
+
+  useEffect(() => { load(); }, [a, b]);                                    // Load on open / when the pair changes.
+
+  async function intervene() {                                            // Post a moderation note into the thread.
+    const body = note.trim();
+    if (!body) return;                                                     // Nothing to say.
+
+    setBusy(true);
+    try {
+      await api("/admin/chats/conversation/message", { method: "POST", token, body: { a, b, message: body } }); // Pushed live to BOTH participants.
+      setNote("");                                                         // Clear the box.
+      load();                                                              // Reload so the note appears in the thread.
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removeMessage(id) {                                       // Delete ONE message.
+    if (!confirm("¿Eliminar este mensaje? No se puede deshacer.")) return;
+    try {
+      await api(`/admin/chats/${id}`, { method: "DELETE", token });          // The narrow tool: keeps the rest of the exchange intact.
+      load();                                                              // Refresh.
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+  if (error) return <p style={{ color: "crimson" }}>{error}</p>;            // Load failure.
+  if (!data) return <p>Cargando…</p>;                                      // Loading state.
+
+  // The API returns the two participants as an unordered array, so identify them
+  // by id rather than by position — array order from Postgres is not guaranteed.
+  const pa = data.participants.find((p) => p.id === a) || data.participants[0]; // Participant A.
+  const pb = data.participants.find((p) => p.id === b) || data.participants[1]; // Participant B.
+
+  return (
+    <div>
+      <div className="row-actions" style={{ marginBottom: 12 }}>
+        <button className="btn btn-secondary btn-sm" onClick={onBack}>← Volver a moderación</button>
+      </div>
+
+      <div className="card">
+        <h3 style={{ margin: 0 }}>
+          {pa?.first_name} {pa?.last_name} ↔ {pb?.first_name} {pb?.last_name} {/* The two people under review. */}
+        </h3>
+        <p className="muted">
+          {pa?.email} ({pa?.current_country || "sin país"}) ·                {/* Context for each side... */}
+          {" "}{pb?.email} ({pb?.current_country || "sin país"})             {/* ...on one line. */}
+        </p>
+        <p className="muted">
+          {/* Moderation state of each account, so the admin can see at a glance
+              whether a mute has already been applied to either party. */}
+          {pa?.first_name}: {pa?.chat_disabled ? "chat bloqueado" : "chat habilitado"} ·
+          {" "}{pb?.first_name}: {pb?.chat_disabled ? "chat bloqueado" : "chat habilitado"}
+        </p>
+      </div>
+
+      <div className="card">
+        <h4 className="section-title">Conversación ({data.messages.length} mensajes)</h4>
+        <div className="conv-thread">                                        {/* Scrollable transcript. */}
+          {data.messages.map((m) => (
+            <div
+              key={m.id}
+              // Three cases: an administration note, participant A, or participant B.
+              // A moderator is a third party, so neither side is "mine" here — the
+              // two participants are distinguished from each other instead.
+              className={
+                m.admin_id ? "msg msg-system"
+                  : m.sender_id === pa?.id ? "msg msg-theirs"                // Participant A on the left.
+                  : "msg msg-mine"                                           // Participant B on the right.
+              }
+            >
+              <span className="msg-label">
+                {m.admin_id
+                  ? "Administración"                                          // A note posted by an admin.
+                  : m.sender_id === pa?.id
+                  ? pa?.first_name                                            // Who said it...
+                  : pb?.first_name}
+                {" · "}{new Date(m.created_at).toLocaleString()}              {/* ...and when. Timestamps matter in a moderation review. */}
+              </span>
+              {m.message}
+              <button
+                className="conv-del"                                          // Small inline control, so per-message deletion doesn't dominate the transcript.
+                onClick={() => removeMessage(m.id)}
+                title="Eliminar este mensaje"
+              >
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="card">
+        <h4 className="section-title">Intervenir en la conversación</h4>
+        <p className="muted">
+          Tu mensaje aparecerá para ambas personas, identificado como
+          “Administración”. Úsalo para advertencias, aclaraciones o para cerrar un
+          intercambio inapropiado. {/* States exactly who will see it, before they send it. */}
+        </p>
+        <textarea
+          rows={3}
+          placeholder="Escribe la intervención…"
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+        />
+        <div className="row-actions">
+          <button className="btn btn-primary btn-sm" onClick={intervene} disabled={busy}>
+            {busy ? "Enviando…" : "Enviar intervención"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 // ---------------------------------------------------------------------------
 function SettingsTab({ token }) {
   const [settings, setSettings] = useState({}); // key -> value map.

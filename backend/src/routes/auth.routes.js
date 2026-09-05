@@ -13,7 +13,7 @@ import speakeasy from "speakeasy";                 // Generate/verify TOTP secre
 import QRCode from "qrcode";                       // Turn the TOTP otpauth:// URI into a scannable QR image.
 import { pool } from "../config/db.js";            // Shared PostgreSQL connection pool for all queries below.
 import { requireAuth } from "../middleware/auth.js"; // Gatekeeper so TOTP/photo endpoints require a logged-in user.
-import { uploadPhoto, storeAndGetUrl } from "../services/photos.js"; // Multer validator + disk-storage helper.
+import { uploadPhoto, saveUserPhoto } from "../services/photos.js"; // Multer validator + DB-storage helper (was storeAndGetUrl, which wrote to ephemeral disk).
 
 const router = Router();       // Create the router we'll attach handlers to and export.
 const SALT_ROUNDS = 12;        // bcrypt cost factor (>=12 per security notes): higher = slower to brute-force.
@@ -133,11 +133,14 @@ router.post(
     if (!req.file) {                                           // Defensive: no file attached...
       return res.status(400).json({ error: "No photo uploaded" }); // ...return a clear 400.
     }
-    const url = storeAndGetUrl(req.file);                       // Save the bytes and get back the URL to store.
-    await pool.query("UPDATE users SET profile_photo_url = $1 WHERE id = $2", [ // Persist the URL on the user's row...
-      url,                                                     // ...so it can be shown as their avatar (Day 3 map cards).
-      req.user.sub,
-    ]);
+    // CHANGE (this patch): saveUserPhoto writes the BYTES into Postgres and returns
+    // "/photos/<userId>?v=<timestamp>". It also performs the users UPDATE itself,
+    // so the separate query that used to live here is gone. The previous version
+    // wrote to backend/uploads/ — which Render wipes on every redeploy, leaving the
+    // stored path pointing at a file that no longer existed. That is the reported
+    // bug: the avatar rendered in "Mi Perfil" (from this response, still in memory)
+    // and nowhere else (from a dead path).
+    const url = await saveUserPhoto(req.user.sub, req.file);     // Persist the image and get the URL to store/return.
     res.json({ profile_photo_url: url });                       // Return the new URL to the frontend.
   }
 );                                                            // End /me/photo.
@@ -162,7 +165,12 @@ export function verifyTotp(secret, token) {                    // Reusable TOTP 
 }                                                             // End verifyTotp.
 
 function publicUser(u) {                                       // Strip secrets before returning a user to the client.
-  const { password_hash, totp_secret, ...safe } = u;          // Destructure out the sensitive fields; keep the rest in `safe`.
+  // CRITICAL (this patch): profile_photo MUST be stripped here. The login handler
+  // runs `SELECT * FROM users`, so once the BYTEA column exists the raw image
+  // bytes would be serialized into the login response as a giant JSON byte array —
+  // megabytes of payload on every sign-in, for data the client never uses. The
+  // image is fetched separately through GET /photos/:userId instead.
+  const { password_hash, totp_secret, profile_photo, ...safe } = u; // Destructure out the sensitive/heavy fields; keep the rest in `safe`.
   return safe;                                                 // Return only the non-sensitive columns.
 }                                                             // End publicUser.
 

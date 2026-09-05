@@ -5,6 +5,18 @@
 // INTENDED OUTPUT LINK: this backs the chat widget opened by the "Chat" button on
 // a user card in the Day 3 dual popup. Every send writes to the chats table AND
 // triggers the mandatory email notification.
+//
+// CHANGE (this patch): every message now also carries pair_low / pair_high — the
+// two participant ids stored in sorted order. That gives a conversation a single
+// stable key, which does three things:
+//   1. Replaces the two-branch OR history query with one indexed lookup.
+//   2. Lets the admin panel list and delete CONVERSATIONS rather than individual
+//      messages (the new Moderación behaviour).
+//   3. Gives an admin intervention note a thread to belong to, without it having
+//      to pretend to be from one of the two participants.
+// Rows written by an admin have admin_id set and sender_id/receiver_id NULL; the
+// history query below returns them to both participants, and ChatWidget.jsx renders
+// them as a centred system notice.
 
 import { Router } from "express";                        // Express router for the /chat endpoints.
 import { pool } from "../config/db.js";                  // Shared PostgreSQL pool.
@@ -41,13 +53,15 @@ router.get("/unread", requireAuth, async (req, res) => {   // Protected: counts 
 router.get("/:otherId", requireAuth, async (req, res) => {  // :otherId = the person whose thread we're opening.
   const me = req.user.sub;                                   // My id, taken from the verified JWT (never from the client body).
   try {
+    // CHANGE: one lookup on the sorted pair key instead of the old symmetric OR.
+    // LEAST/GREATEST reproduce exactly the same sorting the writer used, so both
+    // directions match — and admin notes (sender_id NULL) are included, which the
+    // old sender/receiver query could never have returned.
     const { rows } = await pool.query(
-      // A conversation is symmetric: messages I sent to them, plus messages they
-      // sent to me. The OR pair below collects both directions.
-      `SELECT id, sender_id, receiver_id, message, read_at, created_at
+      `SELECT id, sender_id, receiver_id, admin_id, message, read_at, created_at
        FROM chats
-       WHERE (sender_id = $1 AND receiver_id = $2)   -- my messages to them
-          OR (sender_id = $2 AND receiver_id = $1)   -- their messages to me
+       WHERE pair_low = LEAST($1::uuid, $2::uuid)    -- The smaller of the two ids...
+         AND pair_high = GREATEST($1::uuid, $2::uuid) -- ...and the larger: one conversation, both directions.
        ORDER BY created_at ASC`,                     // Oldest first so the widget reads top-to-bottom.
       [me, req.params.otherId]
     );
@@ -106,9 +120,16 @@ router.post("/", requireAuth, chatLimiter, async (req, res) => { // chatLimiter 
       return res.status(404).json({ error: "Recipient not found" }); // ...tell the client clearly.
     }
 
+    // CHANGE: pair_low/pair_high are written here, computed by the DATABASE with
+    // LEAST/GREATEST rather than in JavaScript. Doing it server-side in SQL
+    // guarantees the identical ordering the read query uses — if the two ever
+    // disagreed, a conversation would silently split into two half-threads.
     const { rows } = await pool.query(                            // STEP 1: persist the message (the source of truth).
-      `INSERT INTO chats (sender_id, receiver_id, message)
-       VALUES ($1, $2, $3) RETURNING *`,                          // RETURNING gives us the id/created_at to send back.
+      `INSERT INTO chats (sender_id, receiver_id, message, pair_low, pair_high)
+       VALUES ($1, $2, $3,
+               LEAST($1::uuid, $2::uuid),                          -- The conversation key, low half.
+               GREATEST($1::uuid, $2::uuid))                       -- The conversation key, high half.
+       RETURNING *`,                                              // RETURNING gives us the id/created_at to send back.
       [req.user.sub, receiver_id, message.trim()]                 // sender_id comes from the TOKEN, so it can't be spoofed.
     );
     const saved = rows[0];                                        // The stored row we'll return and broadcast.

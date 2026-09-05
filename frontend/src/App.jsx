@@ -25,6 +25,7 @@ import WorldMap from "./components/map/WorldMap.jsx";       // The interactive G
 import DualPopup from "./components/popups/DualPopup.jsx";  // Scholarships (left) + students (right).
 import ChatWidget from "./components/chat/ChatWidget.jsx";   // Day 4: bottom-overlay chat with the selected student.
 import AdminPanel from "./components/admin/AdminPanel.jsx";  // Day 5: the isolated administrator interface.
+import HelpWidget from "./components/help/HelpWidget.jsx";   // CHANGE (this patch): the "Ayuda" support-ticket overlay.
 
 // The external site the brand mark links to (product requirement). Declared as a
 // constant so the URL exists in exactly one place if it ever changes.
@@ -63,6 +64,7 @@ export default function App() {                            // Root component.
   const [country, setCountry] = useState(null);            // The country selected on the map (null = popup closed).
   const [showProfile, setShowProfile] = useState(false);   // Toggles the profile/settings panel.
   const [chatPeer, setChatPeer] = useState(null);          // Day 4: who we are chatting with (null = widget closed).
+  const [showHelp, setShowHelp] = useState(false);         // CHANGE (this patch): whether the "Ayuda" ticket overlay is mounted.
   // Day 5: HASH-based routing for the admin panel (#admin). GitHub Pages serves
   // static files with no server-side rewrites, so a path like /admin would 404 on
   // refresh. A hash is handled entirely in the browser and always works.
@@ -85,6 +87,7 @@ export default function App() {                            // Root component.
     setUser(null);                                         // Back to the logged-out view.
     setCountry(null);                                      // Close any open popup so stale data isn't shown.
     setChatPeer(null);                                     // Close the chat widget so it can't keep polling without a token.
+    setShowHelp(false);                                    // Close the help overlay too: its /tickets calls would 401 without a token.
   }
 
   function handleChat(target) {                            // Called when a Chat button on a user card is clicked.
@@ -122,6 +125,10 @@ export default function App() {                            // Root component.
                 className="avatar avatar-sm"                  // Small circular variant for the header.
               />
               <button className="btn btn-secondary" onClick={() => setShowProfile((v) => !v)}>Mi perfil</button> {/* Toggle profile panel. */}
+              {/* NEW: the third header button. It sits between "Mi perfil" and
+                  "Cerrar sesión" deliberately — help belongs with the account
+                  actions, and putting it last would place it after the exit. */}
+              <button className="btn btn-secondary" onClick={() => setShowHelp(true)}>Ayuda</button> {/* Opens the support-ticket overlay. */}
               <button className="btn btn-secondary" onClick={logout}>Cerrar sesión</button> {/* Log out. */}
             </div>
           )}
@@ -163,6 +170,10 @@ export default function App() {                            // Root component.
                 onClose={() => setCountry(null)}               // Closing clears the selection.
                 onChat={handleChat}                            // Chat button hand-off -> opens the widget below.
               />
+            )}
+
+            {showHelp && (                                     // NEW: mount the help overlay on demand.
+              <HelpWidget onClose={() => setShowHelp(false)} /> // Unmounting it stops its requests entirely.
             )}
 
             {chatPeer && (                                     // Day 4: mount the chat overlay once a peer is chosen.

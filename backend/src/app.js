@@ -16,6 +16,8 @@ import usersRoutes from "./routes/users.routes.js";               // Day 3: user
 import scholarshipRoutes from "./routes/scholarships.routes.js";  // Day 3/4: read by country + admin CRUD.
 import chatRoutes from "./routes/chat.routes.js";                 // Day 4: chat history + send.
 import adminRoutes from "./routes/admin.routes.js";               // Day 5: isolated admin panel.
+import photoRoutes from "./routes/photos.routes.js";              // CHANGE (this patch): serves avatars from the DB (replaces the /uploads static mount).
+import ticketRoutes from "./routes/tickets.routes.js";            // CHANGE (this patch): the "Ayuda" support-ticket endpoints.
 
 dotenv.config(); // Read .env NOW, before anything below uses process.env.
 
@@ -111,7 +113,12 @@ app.get("/health", (_req, res) => {          // Lightweight health check (no aut
   res.json({ status: "ok" });                // Used by uptime monitors and the frontend's connectivity indicator.
 });
 
-app.use("/uploads", express.static("uploads")); // Serve uploaded profile photos (local-dev storage; see photos.js).
+// CHANGE (this patch): the /uploads static mount is GONE. Profile photos are now
+// stored in Postgres and served by GET /photos/:userId (see routes/photos.routes.js).
+// Render's filesystem is ephemeral — it is wiped on every redeploy and cold start —
+// so anything written to backend/uploads/ disappeared while the database kept
+// pointing at it. That mismatch was the "photo shows in Mi Perfil but nowhere else"
+// bug. Nothing writes to disk any more, so there is nothing to serve statically.
 
 // ---------------------------------------------------------------------------
 // 7) ROUTES
@@ -121,6 +128,8 @@ app.use("/users", usersRoutes);                  // Users by country (map right 
 app.use("/scholarships", scholarshipRoutes);     // Read by country (left panel) + admin-only CRUD.
 app.use("/chat", chatRoutes);                    // Conversation history, unread count, send.
 app.use("/admin", adminRoutes);                  // Day 5 ACTIVE: isolated admin dashboard and management.
+app.use("/photos", photoRoutes);                 // NEW: GET /photos/:userId streams the avatar out of the database.
+app.use("/tickets", ticketRoutes);               // NEW: student-facing support tickets behind the "Ayuda" button.
 
 // ---------------------------------------------------------------------------
 // 8) FALLBACKS

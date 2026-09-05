@@ -49,7 +49,20 @@ export default function ChatWidget({ peer, me, onClose }) { // peer = who we're 
     socket.on("dm", (msg) => {                    // A message pushed by the server (emitted after it was stored).
       // Only append messages belonging to THIS conversation; the same socket also
       // receives messages from other people, which belong in their own threads.
-      if (msg.sender_id !== peer.id) return;      // Ignore anything from someone else.
+      //
+      // CHANGE (this patch): an admin intervention note has sender_id NULL and
+      // admin_id set, so the old sender check would have discarded it. It is
+      // matched on the conversation key (pair_low/pair_high) instead, which is the
+      // only identifier such a note carries.
+      const isAdminNote = Boolean(msg.admin_id);  // Written by the administration, not by a participant.
+      if (isAdminNote) {                          // For a note, check it belongs to THIS thread...
+        const inThread =                          // ...by comparing the sorted participant pair.
+          (msg.pair_low === peer.id || msg.pair_high === peer.id) &&
+          (msg.pair_low === me?.id || msg.pair_high === me?.id);
+        if (!inThread) return;                    // A note about someone else's conversation: ignore.
+      } else if (msg.sender_id !== peer.id) {     // Normal message from somebody other than the person we have open...
+        return;                                   // ...ignore it here; it belongs to a different thread.
+      }
       setMessages((prev) =>
         prev.some((m) => m.id === msg.id) ? prev : [...prev, msg] // Skip duplicates (id already present).
       );
@@ -107,9 +120,12 @@ export default function ChatWidget({ peer, me, onClose }) { // peer = who we're 
       <header className="chat-header">                             {/* Title bar: who you're talking to + status + close. */}
         <span className="chat-peer">                               {/* Wrapper so the avatar and name align on one baseline. */}
           <img
-            src={mediaUrl(peer.profile_photo_url, `${import.meta.env.BASE_URL}favicon.svg`)} // NEW: the same uploaded photo shown on the map card, resolved to the backend origin.
+            src={mediaUrl(peer.profile_photo_url, `${import.meta.env.BASE_URL}favicon.svg`)} // The same uploaded photo shown on the map card, resolved to the backend origin.
             alt=""                                                 // Decorative: the name sits right next to it.
             className="avatar avatar-xs"                           // Extra-small circular variant sized for the header bar.
+            onError={(e) => {                                      // CHANGE (this patch): if the image 404s (a legacy /uploads path, or a photo since removed)...
+              e.currentTarget.src = `${import.meta.env.BASE_URL}favicon.svg`; // ...degrade to the placeholder instead of showing a broken-image icon.
+            }}
           />
           {peer.first_name} {peer.last_name}                       {/* The other person's name. */}
           <span className={live ? "dot-live" : "dot-off"} title={live ? "En vivo" : "Sin conexión en vivo"} /> {/* Green/gray status dot. */}
@@ -124,8 +140,18 @@ export default function ChatWidget({ peer, me, onClose }) { // peer = who we're 
         {messages.map((m) => (                                     // Render each message.
           <div
             key={m.id}                                             // Stable database id as the React key.
-            className={m.sender_id === me?.id ? "msg msg-mine" : "msg msg-theirs"} // Right-align mine, left-align theirs.
+            // CHANGE (this patch): three cases now, not two. An admin note is
+            // centred and labelled so neither participant can mistake it for the
+            // other person speaking — which is the entire point of an intervention.
+            className={
+              m.admin_id
+                ? "msg msg-system"                                 // Administration note: centred, distinct styling.
+                : m.sender_id === me?.id
+                ? "msg msg-mine"                                   // Mine: right-aligned.
+                : "msg msg-theirs"                                 // Theirs: left-aligned.
+            }
           >
+            {m.admin_id && <span className="msg-label">Administración</span>} {/* Attribution label, only on notes. */}
             {m.message}                                            {/* The message text. */}
           </div>
         ))}

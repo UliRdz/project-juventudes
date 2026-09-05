@@ -1,67 +1,11 @@
-# DEPLOYMENT.md — Post-Development Manual (from zero to live)
+# DEPLOYMENT.md — Orchestrate, Test, Commit and Mount on GitHub Pages
 
-**Project:** `project-juventudes` — Spanish-first scholarship social network
-**Repository name (fixed):** `project-juventudes` · **Frontend:** GitHub Pages · **Backend:** Render (Node.js + PostgreSQL)
+This is the single runbook for **project-juventudes**: it takes the repository
+from a folder on your machine to a live site, in order. Follow the phases top to
+bottom — later phases depend on earlier ones (for example, the frontend deploy
+needs the backend URL, so the backend goes live first).
 
-This is the **consolidated, retrospective manual** for the finished build. During
-development the work was split into five day-plans (setup → auth → map → chat/CMS
-→ admin/deploy). Those five documents remain useful as *design and learning*
-records, but they describe intermediate states. **This manual supersedes them for
-setup and deployment**: it assumes you are starting from scratch with only the
-final code, and it takes you from an empty machine to a live site in one pass.
-
----
-
-## Part A — Retrospective: how the five days map to this manual
-
-Everything the five days produced is already in the final code, so "doing the five
-days" now collapses into the phases below:
-
-| Day | What was built | Where it lands in this manual |
-| --- | --- | --- |
-| **1 — Foundations** | Repo structure, Vite/React + Express scaffolds, `schema.sql`, design tokens, `.env.example` | Phase 1 (env + database + install) — no scaffolding commands needed; the files exist |
-| **2 — Authentication** | Register/login, bcrypt, JWT, TOTP 2FA, photo upload, auth UI | Installed by the same `npm install`; verified in Phase 2 tests 4–8 |
-| **3 — Map & popups** | Leaflet world map, dual popup, users/scholarships endpoints, `PATCH /users/me`, country list generated from the GeoJSON | Verified in Phase 2 tests 9–12 |
-| **4 — Chat, SMTP, CMS, cron** | Socket.io live chat, mandatory email relay, scholarship CRUD, 24h scheduler, rate limits | Phase 1.5 (mail catcher) + Phase 2 tests 13–16 |
-| **5 — Admin & hardening** | Isolated admin panel, migration `002`, `create-admin.js`, helmet/CORS/limits, CI workflow, `render.yaml` | Phase 1.3–1.4 (migration + admin bootstrap), Phase 2 tests 17–22, Phases 4–5 (deploy) |
-
-### Instructions from the day files that the final code SUPERSEDES
-
-If you re-read the five day documents, **do not follow these** — the final code
-moved past them:
-
-1. **No scaffolding.** Skip every `npm create vite`, `npm init -y`, `mkdir`,
-   `touch` from Days 1–2. The files already exist; running scaffolders again can
-   overwrite them.
-2. **No day-by-day installs.** Skip the incremental `npm install <package>` steps
-   from Days 2 and 4. One `npm install` per folder installs all five days'
-   dependencies (backend: express, cors, dotenv, pg, bcrypt, jsonwebtoken,
-   speakeasy, qrcode, multer, socket.io, nodemailer, node-cron,
-   express-rate-limit, helmet; frontend: react, react-dom, leaflet,
-   react-leaflet, socket.io-client).
-3. **Database name.** Day 1 says `scholarship_dev` (the project's pre-rename
-   name). This manual uses **`juventudes_dev`**. Either works — the local name is
-   arbitrary — but your `.env` `DATABASE_URL` must match whichever you create.
-4. **Base path.** Day 1 shows `base: "/scholarship-network/"`. The final code has
-   **`base: "/project-juventudes/"`**, which must equal the GitHub repository
-   name. Never revert this.
-5. **`schema.sql` alone is no longer enough.** Day 5 introduced
-   `migrations/002_day5_admin.sql` (chat mute, settings, country toggles). A
-   fresh database needs **both** files, in that order.
-6. **Scholarship writes are admin-only now.** Day 4's `requireAuth` placeholder on
-   `POST/PUT/DELETE /scholarships` was replaced by `requireAdmin` on Day 5. A
-   normal user token gets 403 there — that is correct behavior, not a bug.
-7. **Admins are created by script, not SQL or signup.** Use
-   `backend/scripts/create-admin.js` (Phase 1.4). There is deliberately no admin
-   signup endpoint.
-8. **Rate limits as shipped:** login **10 attempts / 15 min** on *both*
-   `/auth/login` and `/admin/login` (the Day 5 text said 5 for admin; the final
-   code standardizes on one limiter), and chat **20 messages / min**.
-9. **Two secrets, not one.** The final `.env` adds `ADMIN_JWT_SECRET` so admin
-   tokens are signed separately from user tokens (falls back to `JWT_SECRET` if
-   unset, but set both).
-
-**Architecture being deployed** (unchanged since Day 1's design):
+**What you are deploying (two halves, two hosts):**
 
 ```text
 ┌────────────────────────────┐        HTTPS + WebSocket        ┌─────────────────────────────┐
@@ -71,227 +15,250 @@ moved past them:
 └────────────────────────────┘        JSON / events            └─────────────────────────────┘
 ```
 
-GitHub Pages serves only static files, so it hosts the built frontend; everything
-stateful (database, sockets, email, the 24h refresh) runs on Render.
+GitHub Pages can only serve static files — it cannot run Node, hold a database,
+or send email. That is why every step below exists twice: once for the static
+frontend (Pages) and once for the stateful backend (Render).
 
 ---
 
-## Part B — Phase 0 · Prerequisites
+## Phase 0 — Prerequisites
+
+Install / create these before starting:
 
 | Tool / account | Why | Check |
 | --- | --- | --- |
-| **Node.js 20 LTS** (18 min.) | Backend + frontend build; code uses Node 18's built-in `fetch` | `node -v` |
-| **PostgreSQL 14+** local | Development database | `psql --version` |
-| **Git** | Version control + push | `git --version` |
-| **GitHub account** | Repo + Pages hosting | — |
-| **Render account** (free) | API + managed PostgreSQL | render.com |
-| **SMTP provider** (prod only) | Real chat-notification email | — |
+| **Node.js 20 LTS** (18 minimum) | Runs backend + frontend build; the code uses Node 18's built-in `fetch` | `node -v` |
+| **PostgreSQL 14+** (local) | The development database | `psql --version` |
+| **Git** | Version control + pushing to GitHub | `git --version` |
+| **GitHub account** | Hosts the repo and the Pages site | — |
+| **Render account** (free) | Hosts the API + managed PostgreSQL | render.com |
+| **SMTP provider** (production only) | Real chat-notification email (Mailtrap/Brevo/Gmail SMTP…) | — |
 
-> **Windows:** run everything below in **Git Bash** so the syntax works unchanged.
+> **Windows users:** run the commands below in **Git Bash** (installed with Git),
+> not CMD/PowerShell, so the `bash` syntax works unchanged.
 
 ---
 
-## Phase 1 · Local orchestration from scratch
+## Phase 1 — Orchestrate locally (get everything running)
 
-### 1.1 Position the code
+### 1.1 Position the project
 
-Unzip the final package and open a terminal at the repo root:
-
-```bash
-cd project-juventudes         # Must contain backend/, frontend/, render.yaml, .github/, .env.example
-ls -la                        # (.env.example and .github/ are hidden files)
-```
-
-### 1.2 Environment file
+Unzip `project-juventudes-complete.zip` and open a terminal at the repo root:
 
 ```bash
-cp .env.example .env          # .env is git-ignored; secrets never reach GitHub.
+cd project-juventudes        # You should see backend/, frontend/, render.yaml, .github/
+ls -la                       # Confirm .env.example, .gitignore and .github/ are present (they are hidden files).
 ```
 
-Edit `.env` — minimum working local set:
+### 1.2 Create your environment file
+
+```bash
+cp .env.example .env         # Copy the template; .env is git-ignored so secrets never reach GitHub.
+```
+
+Edit `.env` and set at least these for local work:
 
 ```text
-DATABASE_URL=postgres://<pg_user>:<password>@localhost:5432/juventudes_dev
+DATABASE_URL=postgres://<your_pg_user>:<password>@localhost:5432/juventudes_dev
 DATABASE_SSL=false
 FRONTEND_ORIGIN=http://localhost:5173
-JWT_SECRET=<long random string>
-ADMIN_JWT_SECRET=<a DIFFERENT long random string>
-SMTP_HOST=127.0.0.1           # the local mail catcher from 1.5
+JWT_SECRET=<paste a long random string>
+ADMIN_JWT_SECRET=<paste a DIFFERENT long random string>
+SMTP_HOST=127.0.0.1          # points at the local mail catcher from step 1.5
 SMTP_PORT=2525
 SMTP_FROM=juventudes@gtoxmundo.com
 ```
 
-Generate secrets: `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"`
+Generate good secrets with: `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"`
 
-### 1.3 Database — schema, migration, optional seed (this order)
-
-```bash
-createdb juventudes_dev                                             # 1) Empty database.
-psql juventudes_dev -f backend/src/db/schema.sql                    # 2) Day 1 core: users, admins, scholarships, chats, audit_logs.
-psql juventudes_dev -f backend/src/db/migrations/002_day5_admin.sql # 3) Day 5: chat mute, settings, country toggles. Idempotent.
-psql juventudes_dev -f backend/src/db/seed.sql                      # 4) OPTIONAL demo data — LOCAL ONLY.
-```
-
-> **Have a Day 1 database already** (e.g. `scholarship_dev`)? Keep it: point
-> `DATABASE_URL` at it and run steps 3–4 against that name. Only the migration is
-> mandatory — it didn't exist on Day 1.
-
-> ⚠️ **seed.sql is local-only.** It creates `demo@example.com` /
-> `admin@example.com` with password `demo1234`, printed in this repository.
-> Never run it in production.
-
-### 1.4 Backend — install everything, bootstrap the first admin
+### 1.3 Create the database and apply the SQL (in this exact order)
 
 ```bash
-cd backend
-npm install                                                # All 5 days' packages in one pass; also generates package-lock.json.
-node scripts/create-admin.js you@example.com "a-strong-password-12chars+"
+createdb juventudes_dev                                            # 1) Empty database.
+psql juventudes_dev -f backend/src/db/schema.sql                   # 2) Core tables (users, scholarships, chats, admins, audit_logs).
+psql juventudes_dev -f backend/src/db/migrations/002_day5_admin.sql # 3) Day 5 additions (chat mute, settings, country toggles). Idempotent.
+psql juventudes_dev -f backend/src/db/migrations/003_profile_contact.sql # 4) Photo release: profile_photo_url + phone_country_code + phone_number. Idempotent.
+psql juventudes_dev -f backend/src/db/seed.sql                     # 5) OPTIONAL demo data — LOCAL ONLY (see warning below).
 ```
 
-> **Keep both `package-lock.json` files.** GitHub Actions and Render install with
-> `npm ci`, which **fails without a committed lockfile**. They must be committed
-> in Phase 3.
+> **Why 003 exists even though `schema.sql` already declares those three
+> columns:** a database created from an *earlier* revision of `schema.sql` is
+> missing them, and a missing column surfaces as a confusing 500 ("column does
+> not exist") on registration and on photo upload. Every statement in 003 uses
+> `IF NOT EXISTS`, so on a database built from the current `schema.sql` it is a
+> no-op. Running it unconditionally makes both cases identical.
 
-### 1.5 Mail catcher (terminal 1)
+> ⚠️ **seed.sql is for local development only.** It creates
+> `demo@example.com` / `admin@example.com` with the password `demo1234`, which is
+> printed in this public repository. Never run it against production.
 
-Every chat message must trigger an email (product requirement). Locally, catch
-them instead of sending real mail:
+### 1.4 Install backend dependencies and bootstrap the first admin
 
 ```bash
 cd backend
-node scripts/dev-smtp.js       # Prints every email it receives. Leave running.
+npm install                                            # Installs everything in package.json AND generates package-lock.json.
+node scripts/create-admin.js you@example.com "a-strong-password-12chars+"   # No admin signup route exists by design; this is the way in.
 ```
 
-### 1.6 Backend server (terminal 2)
+> **Do not delete `package-lock.json`.** Both CI pipelines (GitHub Actions and
+> Render) install with `npm ci`, which **fails if the lockfile is missing**. It
+> must be committed in Phase 3.
+
+### 1.5 Start the local email catcher (terminal 1)
+
+The spec requires an email on every chat message; this prints them instead of
+sending real mail:
 
 ```bash
 cd backend
-npm run dev                    # Expect: "API + WebSocket running on :4000" + "Scheduler registered: daily at 03:00".
+node scripts/dev-smtp.js     # Leave running. Every chat email appears in this terminal.
 ```
 
-### 1.7 Frontend (terminal 3)
+### 1.6 Start the backend (terminal 2)
+
+```bash
+cd backend
+npm run dev                  # Expect: "API + WebSocket running on :4000" and "Scheduler registered: daily at 03:00".
+```
+
+### 1.7 Start the frontend (terminal 3)
 
 ```bash
 cd frontend
-npm install                    # Generates frontend/package-lock.json (commit it too).
-npm run dev                    # http://localhost:5173
+npm install                  # Also generates frontend/package-lock.json (commit it too).
+npm run dev                  # Opens on http://localhost:5173
 ```
 
-Open **http://localhost:5173** — the page must show **"Backend health: ok"**.
-That line proves the two halves are connected; do not continue until it does.
+Open **http://localhost:5173**. The page must show **"Backend health: ok"** —
+that line is the proof the two halves are talking. If it says
+"backend unreachable", fix that before continuing (see Troubleshooting).
 
 ---
 
-## Phase 2 · Master test plan (all five days' checklists, consolidated)
+## Phase 2 — Test everything locally
 
-Work through this in the browser. Numbers group by the day that built the feature.
+Run through this in the browser (it mirrors the five days' validation
+checklists). Each item maps to a feature you built:
 
-**Day 1 — foundations**
-1. Frontend loads with the brand palette (deep-blue title) — `tokens.css` active.
-2. "Backend health: ok" — CORS + API client working.
-3. `psql juventudes_dev -c "\dt"` lists 8 tables (5 core + settings, countries_enabled, plus audit_logs).
+**Student flow**
+1. **Register** a new account (password must be 8+ chars; a duplicate email must show an error, not crash).
+2. **Log in** → the map view appears.
+3. Open **Mi perfil** → pick a country from the dropdown (e.g. `Mexico`) → **Guardar**. *(Without this step you are invisible on the map — registration deliberately doesn't ask for a country.)*
+4. Optional: **Seguridad (2FA)** → Activar → scan the QR with Google Authenticator → confirm a code → log out and back in; it must now demand the 6-digit code.
+5. On the map: **hover** = light blue, **click** = deep blue + the dual popup opens (scholarships left, students right). Logged out, a click must be blocked.
+6. In a **second browser / private window**, register a second user, set the *same* country, and from the first account click **Chat** on their card. Send a message:
+   - it appears instantly in the other window (green dot = live socket), and
+   - the notification email prints in the **dev-smtp terminal** with subject `Nuevo mensaje de <name>`.
+7. Send >20 messages in a minute → the composer must show the rate-limit error (HTTP 429).
 
-**Day 2 — authentication**
-4. Register (8+ char password). Registering the same email again shows an error (409), not a crash.
-5. Log in → the map view appears. `psql`-check: `password_hash` starts with `$2b$12$`, never plaintext.
-6. Optional 2FA: Seguridad → Activar → scan QR in Google Authenticator → confirm → logout → login now demands the 6-digit code; a wrong code is rejected.
-7. Photo upload: a JPG/PNG under 5MB is accepted; a bigger or non-image file is rejected with a clear message.
-8. `audit_logs` has rows for your login attempts.
+**Admin flow**
+8. Open **http://localhost:5173/#admin** (note the `#`) → log in with the admin created in 1.4. Your *student* login must NOT work here.
+9. **Resumen**: the five widgets show live numbers.
+10. **Becas**: add a manual scholarship for a country → it appears with a **Manual** badge, and immediately shows in that country's map popup for students.
+11. **Usuarios**: mute your second user → in their window, sending chat now fails (403); unmute restores it. Try **Exportar CSV**.
+12. **Sistema**: set `maintenance_mode` to `true` → the student window gets a 503 message; the admin panel keeps working; set it back to `false`.
 
-**Day 3 — map & discovery**
-9. **Mi perfil → pick a country from the dropdown → Guardar.** (Registration doesn't ask for one; without this you appear in no country panel — by design.)
-10. Map: hover = light blue; click = deep blue + dual popup (scholarships left, students right). Logged out, clicks are blocked client-side *and* the API returns 401.
-11. In a second/private browser window, register a second user and set the *same* country → they appear on the first user's panel (the viewer is excluded from their own list).
-12. Country names must come from dropdowns only — the list is generated from the GeoJSON, so "United States of America" matches and hand-typed "United States" silently wouldn't.
-
-**Day 4 — chat, email, CMS, cron**
-13. From user A, click **Chat** on user B's card, send a message → it appears **instantly** in B's window (green dot = live socket) **and** the email prints in the dev-smtp terminal (`Nuevo mensaje de <name>`).
-14. Blank message → rejected; messaging yourself → rejected; >20 messages in a minute → rate-limit error (429).
-15. Close/reopen the chat → history persists; B's unread count drops to 0 after reading.
-16. Scheduler: it fires at 03:00, or trigger it now from the admin panel (test 20) — expired scholarships flip to inactive and vanish from the student view.
-
-**Day 5 — admin & hardening**
-17. **`http://localhost:5173/#admin`** → log in with the 1.4 admin. Your *student* credentials must fail here, and a student token must get 403 on admin APIs.
-18. Resumen: five live widgets (users, active scholarships, countries, pending chats, last update).
-19. Becas: add a manual scholarship → "Manual" badge → **it appears in that country's map popup for students immediately.** Delete works.
-20. Sistema: **Actualizar becas ahora** runs the refresh on demand; **Probar SMTP** lands in the dev-smtp terminal.
-21. Usuarios: mute your second user → their sends now fail (403); unmute restores; **Exportar CSV** downloads a well-formed file (commas in names stay in one cell; a name starting with `=` is neutralized).
-22. Sistema → `maintenance_mode=true` → the student window gets a 503 message while `#admin` keeps working → set back to `false`.
-
-**Pre-flight (must pass before committing):**
+**Command-line spot checks (optional but fast):**
 
 ```bash
-cd frontend && npm run build      # Must end "✓ built" — exactly what CI will run.
+curl -s localhost:4000/health                                   # -> {"status":"ok"}
+curl -s -o /dev/null -w "%{http_code}\n" "localhost:4000/scholarships?country=Mexico"   # -> 401 (login required, enforced server-side)
+```
+
+**Pre-flight build (must pass before committing):**
+
+```bash
+cd frontend && npm run build     # Must end with "✓ built". This is exactly what GitHub Actions will run.
 cd ../backend && for f in $(find src scripts server.js -name '*.js'); do node --check "$f" || echo "FAIL $f"; done
 ```
 
 ---
 
-## Phase 3 · Commit and push to GitHub
+## Phase 3 — Commit and push to GitHub
 
-### 3.1 The repository name is load-bearing
+### 3.1 The repository name is not optional
 
-`frontend/vite.config.js` has `base: "/project-juventudes/"`. On GitHub Pages the
-**repo must be named exactly `project-juventudes`**, or every built asset URL
-404s and the site renders blank. (Renaming the repo later means changing `base`
-and the favicon path in `frontend/index.html` to match.)
+`frontend/vite.config.js` contains `base: "/project-juventudes/"`. On GitHub
+Pages, **the repo name must be exactly `project-juventudes`** or every asset
+URL 404s and the deployed page renders blank. (If you ever rename the repo,
+change `base` — and the favicon path in `frontend/index.html` — to match.)
 
-### 3.2 Initialize, verify, push
+### 3.2 Initialize, verify what will be committed, and push
 
 ```bash
-cd project-juventudes
-git init
-git add .
-git status        # VERIFY:
-                  #  MUST be staged:  backend/package-lock.json, frontend/package-lock.json,
-                  #                   .github/workflows/deploy-frontend.yml, render.yaml
-                  #  MUST be absent:  .env, node_modules/, backend/uploads/, frontend/dist/
-git commit -m "project-juventudes: scholarship social network (5-day build)"
-git branch -M main
+cd project-juventudes                 # repo root
+git init                              # New local repository.
+git add .                             # Stage everything not excluded by .gitignore.
+git status                            # VERIFY before committing:
+                                      #   MUST be listed:   backend/package-lock.json, frontend/package-lock.json,
+                                      #                     .github/workflows/deploy-frontend.yml, render.yaml
+                                      #   MUST NOT appear:  .env, node_modules/, backend/uploads/, frontend/dist/
+git commit -m "Scholarship social network: full 5-day build"
+git branch -M main                    # The workflow triggers on pushes to main.
 ```
 
-On github.com: **New repository → name `project-juventudes` → Public** (free-plan
-Pages requires public). Then:
+Create the repo on GitHub (via the website: **New repository → name:
+`project-juventudes` → Public** — Pages on the free plan requires a public
+repo), then:
 
 ```bash
 git remote add origin https://github.com/<your-username>/project-juventudes.git
 git push -u origin main
 ```
 
-> The push triggers the Pages workflow and **it will fail** — expected: Pages
-> isn't enabled and the backend URL secret doesn't exist yet. Phases 4–5 fix it;
-> you re-run in 5.3.
+> The push will start the "Deploy frontend to Pages" workflow, and **its deploy
+> step will fail** — expected, because Pages isn't enabled and the backend URL
+> secret doesn't exist yet. Phases 4–5 fix that; you'll re-run it in 5.3.
 
 ---
 
-## Phase 4 · Deploy the backend first (Render)
+## Phase 4 — Deploy the backend first (Render)
 
-The Pages build bakes the backend URL into the bundle, so the backend must exist
-before the frontend deploy.
+The frontend build bakes the backend URL into the bundle, so the backend must
+exist before the Pages build.
 
-### 4.1 Blueprint
+### 4.1 Create the services from the blueprint
 
-Render → **New + → Blueprint** → connect the repo. Render reads `render.yaml`
-(API service + PostgreSQL) and prompts for the `sync: false` values:
-
-- `FRONTEND_ORIGIN` = `https://<your-username>.github.io` — **origin only: no
-  path, no trailing slash.** CORS matches scheme+host; a path would never match.
-- `SMTP_HOST/PORT/USER/PASS/FROM` = your real provider (never the local catcher).
-- `SCHOLARSHIP_API_URL` = your source, or blank to skip the nightly import.
-
-`JWT_SECRET` and `ADMIN_JWT_SECRET` are auto-generated by the blueprint. Deploy.
+1. Render dashboard → **New + → Blueprint** → connect the
+   `project-juventudes` repo. Render reads `render.yaml` and proposes the API
+   service + the PostgreSQL database.
+2. It prompts for every `sync: false` variable. Set:
+   - `FRONTEND_ORIGIN` = `https://<your-username>.github.io`
+     — **origin only: no path, no trailing slash.** CORS matches origins
+     (scheme+host), so `https://user.github.io/project-juventudes` would never match.
+   - `SMTP_HOST / SMTP_PORT / SMTP_USER / SMTP_PASS / SMTP_FROM` = your real
+     provider (never the local catcher).
+   - `SCHOLARSHIP_API_URL` = your scholarship source (leave blank to skip the
+     nightly import for now).
+3. Deploy. First build takes a few minutes.
 
 ### 4.2 Apply the SQL to the managed database
 
-Copy the database's **External Connection String**, then locally:
+On the Render **database** page copy the **External Connection String**, then
+from your machine:
 
 ```bash
-export PROD_DB="<external-connection-string>"                     # Secret — contains credentials.
-psql "$PROD_DB" -f backend/src/db/schema.sql
-psql "$PROD_DB" -f backend/src/db/migrations/002_day5_admin.sql   # Do NOT run seed.sql here.
+export PROD_DB="<external-connection-string>"                          # Contains user/pass/host — treat as a secret.
+psql "$PROD_DB" -f backend/src/db/schema.sql                           # Core tables.
+psql "$PROD_DB" -f backend/src/db/migrations/002_day5_admin.sql        # Day 5 tables. (Do NOT run seed.sql here.)
+psql "$PROD_DB" -f backend/src/db/migrations/003_profile_contact.sql   # Photo release: avatar path + private phone pair. Idempotent, safe to re-run.
 ```
 
-### 4.3 Production admin
+Verify the third file actually landed on the database your API is connected to:
+
+```bash
+psql "$PROD_DB" -c "SELECT column_name FROM information_schema.columns \
+  WHERE table_name='users' \
+    AND column_name IN ('profile_photo_url','phone_country_code','phone_number');"
+# Expect exactly 3 rows. Fewer means DATABASE_URL on the web service points
+# somewhere else than $PROD_DB — registration will return 500 until they match.
+```
+
+> **Ordering:** run this migration *before* the new backend serves its first
+> request. A backend that inserts `phone_number` into a table without that
+> column returns 500 on every registration.
+
+### 4.3 Create the production admin
 
 ```bash
 cd backend
@@ -301,60 +268,81 @@ DATABASE_URL="$PROD_DB" DATABASE_SSL=true node scripts/create-admin.js admin@you
 ### 4.4 Verify
 
 ```bash
-curl https://<your-app>.onrender.com/health      # -> {"status":"ok"}
+curl https://<your-app>.onrender.com/health        # -> {"status":"ok"}
 ```
 
-That URL is the value of the next phase's secret.
+Keep that URL — it is the value of the next phase's secret.
 
 ---
 
-## Phase 5 · Mount the frontend on GitHub Pages
+## Phase 5 — Mount the frontend on GitHub Pages
 
-1. **Enable Pages:** repo → Settings → Pages → Source: **"GitHub Actions"**.
-2. **Secret:** Settings → Secrets and variables → Actions → New repository secret
-   → Name `VITE_API_URL`, Value `https://<your-app>.onrender.com` (no trailing
-   slash). Vite inlines it at **build time** — Pages has no server to read it later.
-3. **Run:** Actions tab → **"Deploy frontend to Pages"** → **Run workflow** (the
-   manual trigger exists for exactly this first run). Watch: checkout → Node 20 →
-   `npm ci` → build → deploy. Afterwards, every push to `main` touching
-   `frontend/**` redeploys automatically.
-4. **Open:**
-   - Students: `https://<your-username>.github.io/project-juventudes/`
-   - Admin: `https://<your-username>.github.io/project-juventudes/#admin`
-     *(hash routing on purpose — Pages has no rewrites, so `/admin` would 404 on
-     refresh; a `#admin` hash never reaches the server).*
+### 5.1 Enable Pages
+
+GitHub repo → **Settings → Pages → Build and deployment → Source:
+"GitHub Actions"**.
+
+### 5.2 Add the backend URL secret
+
+**Settings → Secrets and variables → Actions → New repository secret**:
+
+- Name: `VITE_API_URL`
+- Value: `https://<your-app>.onrender.com`   *(no trailing slash)*
+
+Vite inlines this at **build time** — there is no server on Pages to read it at
+runtime, which is why it must exist *before* the build runs.
+
+### 5.3 Run the deployment
+
+**Actions tab → "Deploy frontend to Pages" → Run workflow** (the manual
+`workflow_dispatch` trigger exists exactly for this). Watch it go green:
+checkout → Node 20 → `npm ci` → build → upload → deploy. From now on, every push
+to `main` touching `frontend/**` redeploys automatically.
+
+### 5.4 Open the site
+
+- Student app: `https://<your-username>.github.io/project-juventudes/`
+- Admin panel: `https://<your-username>.github.io/project-juventudes/#admin`
+  *(hash routing on purpose — Pages has no server rewrites, so a `/admin` path
+  would 404 on refresh; a `#admin` hash never reaches the server).*
 
 ---
 
-## Phase 6 · Production smoke test
+## Phase 6 — Production smoke test
 
-In order: (1) `/health` returns ok → (2) site shows "Backend health: ok" (CORS +
-baked URL correct) → (3) register, log in, set a country, confirm your card shows
-from a second account → (4) send a chat, confirm the **real** email arrives
-(check spam once) → (5) `#admin` with the Phase 4.3 admin, add a manual
-scholarship, confirm a student sees it with **no redeploy** → (6) dashboard
-counts reflect all of it.
+Run the same sequence as Phase 2, now against the live site, in this order:
 
-> **Free tier:** Render sleeps idle instances — the first request after a quiet
-> period takes ~30–60 s. That's the host waking, not a bug.
+1. `https://<app>.onrender.com/health` returns `ok`.
+2. Site loads with **"Backend health: ok"** (proves CORS + the baked-in URL are right).
+3. Register → log in → set a country in **Mi perfil** → your card appears in that country's panel from a second account.
+4. Send a chat message → the **real email** arrives (check spam the first time).
+5. **Mi perfil** → **Cambiar foto** → upload a JPG under 5 MB → the header avatar
+   updates, and the same photo appears on your card in the country panel and in
+   the chat header. (If it stays a placeholder, `VITE_API_URL` was not set at
+   build time — see Troubleshooting.)
+6. Logo top-left on every screen, language selector top-right; translate to
+   English and back — neither should shift position.
+7. `#admin` → log in with the Phase 4.3 admin → add a manual scholarship →
+   confirm a student sees it on the map with no redeploy.
+8. `#admin` → **Usuarios** → **Editar** a profile and save, then **Becas** →
+   **Editar** a scholarship and save. Both should reload with the new values.
+9. Dashboard counts reflect everything you just did.
+
+> **Free-tier note:** Render's free instances sleep when idle — the first
+> request after a quiet period takes ~30–60 s to wake. That is the host, not a bug.
 
 ---
 
-## Phase 7 · Operating it after launch
+## Phase 7 — Two follow-ups before real traffic
 
-1. **The 03:00 refresh only fires while the process is awake.** On a sleeping
-   free instance, trigger it externally — a GitHub Actions cron that logs into
-   `/admin/login` and calls `POST /admin/scholarships/refresh` — or press
-   **"Actualizar becas ahora"** in Sistema.
-2. **Known pre-production items (flagged during the build, intentionally open):**
-   `totp_secret` is plaintext at rest (add KMS/envelope encryption before scale),
-   and profile photos write to local disk, which **Render wipes on every
-   redeploy** — swap `storeAndGetUrl()` in `backend/src/services/photos.js` for
-   object storage (S3/Cloudinary); the validation stays identical.
-3. **Migrations:** flip `maintenance_mode` to `true` in Sistema first — users get
-   a clean 503 while `/admin` and `/health` stay reachable — then back off.
-4. **Rotate** the demo-era secrets: never reuse `demo1234`-style credentials or
-   the local `JWT_SECRET` values anywhere near production.
+1. **The 03:00 scholarship refresh only runs while the process is awake.** On the
+   free (sleeping) tier, schedule it externally: a GitHub Actions cron that logs
+   into `/admin/login` and calls `POST /admin/scholarships/refresh`, or simply
+   press **"Actualizar becas ahora"** in the admin panel's Sistema tab.
+2. **Known pre-production items** (documented in the README): encrypt
+   `totp_secret` at rest, and move profile photos from local disk to object
+   storage — **Render wipes `uploads/` on every redeploy**, so production photos
+   need S3/Cloudinary (only `storeAndGetUrl()` in `photos.js` changes).
 
 ---
 
@@ -362,45 +350,34 @@ counts reflect all of it.
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
-| Pages site **blank**, console 404s | Repo name ≠ `base` in `vite.config.js` | Repo must be `project-juventudes`; push again |
-| **CORS error** / "backend unreachable" | `FRONTEND_ORIGIN` wrong on Render | `https://<user>.github.io` exactly — origin only |
-| CI fails at **`npm ci`** | Lockfiles not committed | `npm install` in both folders, commit both `package-lock.json`, push |
-| Deploy step "Get Pages site failed" | Pages source not set | Settings → Pages → GitHub Actions, re-run |
-| Live site calls `localhost:4000` | `VITE_API_URL` secret missing at build | Add secret, **re-run the workflow** (rebuild required) |
-| Country panel **empty, no error** | Name mismatch vs the GeoJSON | Use the dropdowns only; regenerate list via `frontend/scripts/generate-countries.js` if the map file changes |
-| Everything 503 "En mantenimiento" | `maintenance_mode=true` | `#admin` → Sistema → set `false` |
-| Chat works, **no email** | `SMTP_HOST` unset (logged + skipped) or bad creds | Fix SMTP vars; verify with **Probar SMTP** |
-| **403** on admin routes as a student | Token isolation working as designed | Log in at `#admin` with an admin account |
-| **403** on creating a scholarship | Writes are admin-only since Day 5 | Use the admin panel, not a user session |
-| First request takes ~1 min | Free instance waking | Expected; upgrade or accept |
-| `psql` SSL errors to Render | Managed Postgres needs TLS | External Connection String; scripts need `DATABASE_SSL=true` |
+| Pages site is **blank**, console full of 404s | Repo name ≠ `base` in `vite.config.js` | Make them identical, push again |
+| Browser shows **CORS error**; site says "backend unreachable" | `FRONTEND_ORIGIN` wrong on Render | Set it to `https://<user>.github.io` exactly — origin only, no path/slash |
+| Workflow fails at **`npm ci`** | `package-lock.json` not committed | `npm install` in both folders, commit both lockfiles, push |
+| Workflow deploy step: "Get Pages site failed" | Pages source not set | Settings → Pages → Source: GitHub Actions, then re-run |
+| Site loads but calls hit `http://localhost:4000` | `VITE_API_URL` secret missing at build time | Add the secret, **re-run the workflow** (a rebuild is required) |
+| A country's user panel is **empty, no error** | Country string mismatch (e.g. "United States" vs "United States of America") | Only set countries via the dropdowns (generated from the GeoJSON); never hand-edit |
+| Everything returns **503 "En mantenimiento"** | `maintenance_mode` is `true` | Admin panel → Sistema → set it to `false` (`/admin` stays reachable for exactly this) |
+| Chat sends but **no email** | `SMTP_HOST` unset (backend logs a warning and skips) or wrong credentials | Fix SMTP vars; verify with admin **Probar SMTP** |
+| **403** on admin routes with a student login | Working as designed — token isolation | Use the `#admin` login with an admin account |
+| First request after idle takes ~1 min | Free instance waking up | Expected on the free tier; upgrade or accept |
+| `psql` SSL errors against Render | Managed Postgres requires TLS | Use the External Connection String; for the admin script also set `DATABASE_SSL=true` |
 
 ---
 
-## Quick reference — zero to live
+## Quick reference — the whole path in 12 commands
 
 ```bash
-# LOCAL (Phases 1–2)
-cp .env.example .env                                   # then fill values
 createdb juventudes_dev
 psql juventudes_dev -f backend/src/db/schema.sql
 psql juventudes_dev -f backend/src/db/migrations/002_day5_admin.sql
-(cd backend  && npm install && node scripts/create-admin.js you@x.com "strong-pass-12+")
-(cd backend  && node scripts/dev-smtp.js &)            # terminal 1
-(cd backend  && npm run dev &)                         # terminal 2
-(cd frontend && npm install && npm run dev)            # terminal 3 → test at :5173 (+ /#admin)
-(cd frontend && npm run build)                         # must pass before pushing
-
-# GITHUB (Phase 3)
+psql juventudes_dev -f backend/src/db/migrations/003_profile_contact.sql
+(cd backend && npm install && node scripts/create-admin.js you@x.com "strong-pass-12+")
+(cd backend && node scripts/dev-smtp.js &) ; (cd backend && npm run dev &)
+(cd frontend && npm install && npm run dev)          # test at :5173, then:
+(cd frontend && npm run build)                       # must pass before pushing
 git init && git add . && git commit -m "initial" && git branch -M main
 git remote add origin https://github.com/<user>/project-juventudes.git && git push -u origin main
-
-# BACKEND (Phase 4): Render → New Blueprint → fill env vars
-psql "$PROD_DB" -f backend/src/db/schema.sql
-psql "$PROD_DB" -f backend/src/db/migrations/002_day5_admin.sql
-(cd backend && DATABASE_URL="$PROD_DB" DATABASE_SSL=true node scripts/create-admin.js admin@x.com "prod-pass-12+")
-
-# FRONTEND (Phase 5): Settings→Pages: GitHub Actions | Secret VITE_API_URL=<render URL>
-# Actions → "Deploy frontend to Pages" → Run workflow
-# → https://<user>.github.io/project-juventudes/   (+ /#admin)
+# Render: New Blueprint -> fill env vars -> apply schema + migrations 002 AND 003 to prod DB -> create prod admin
+# GitHub: Settings->Pages: GitHub Actions | Secrets: VITE_API_URL=<render URL>
+# Actions -> "Deploy frontend to Pages" -> Run workflow -> open https://<user>.github.io/project-juventudes/
 ```

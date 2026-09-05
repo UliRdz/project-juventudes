@@ -77,9 +77,12 @@ export default function DualPopup({ country, onClose, onChat }) { // Props: whic
         {users.map((u) => (                              // Render one card per user.
           <div className="user-card" key={u.id}>         {/* key = user id so React tracks rows efficiently. */}
             <img
-              src={mediaUrl(u.profile_photo_url, `${import.meta.env.BASE_URL}favicon.svg`)} // THE FIX: mediaUrl() rewrites "/uploads/x.jpg" to "<backend origin>/uploads/x.jpg"; the second argument is the brand-mark fallback for users with no photo.
+              src={mediaUrl(u.profile_photo_url, `${import.meta.env.BASE_URL}favicon.svg`)} // mediaUrl() prefixes the backend origin, so "/photos/<id>?v=..." resolves against Render and not against github.io; the second argument is the brand-mark fallback for users with no photo.
               alt=""                                     // Decorative image: empty alt keeps screen readers from reading noise.
               className="avatar"                         // CSS makes it a circle (per the spec).
+              onError={(e) => {                          // CHANGE (this patch): a 404 (legacy /uploads path, or a photo since removed)...
+                e.currentTarget.src = `${import.meta.env.BASE_URL}favicon.svg`; // ...falls back to the placeholder rather than a broken-image icon.
+              }}
             />
             <div className="user-info">                  {/* Text block beside the avatar. */}
               <strong>{u.first_name} {u.last_name}</strong> {/* Full name. */}
